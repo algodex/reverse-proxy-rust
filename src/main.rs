@@ -77,7 +77,7 @@ async fn handle(client_ip: IpAddr, req: Request<Body>) -> Result<Response<Body>,
                     Ok(response) => {Ok(response)}
                     Err(_error) => {Ok(Response::builder()
                                         .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                        .body(Body::empty())
+                                        .body(Body::from("error response"))
                                         .unwrap())}
                     }
                 }
