@@ -18,16 +18,34 @@ use std::time::Duration;
 // use tokio::time::timeout;
 use tokio::time::sleep;
 use tokio::task;
+use std::collections::HashMap;
+use tokio::time::Instant;
 
+// let body = reqwest::get("https://www.rust-lang.org")
+//     .await?
+//     .text()
+//     .await?;
+type Uri = String;
+
+
+const MAX_CACHE_TIME_SECS: u64 = 5;
+const REQ_TIMEOUT: u64 = 3;
+
+#[derive(Clone, Debug)]
+struct CachedResponse {
+    body: String,
+    time: Instant
+}
 
 struct AppState {
-    messages: RwLock<Vec<String>>,
+    response_cache: RwLock<HashMap<Uri,CachedResponse>>,
+
 }
 impl AppState {
     fn new() -> Self {
-        let messages: Vec<String> = Vec::new();
-        let mutex = RwLock::new(messages);
-        AppState{messages: mutex}
+        let urlToResponse: HashMap<Uri,CachedResponse> = HashMap::new();
+        let mutex = RwLock::new(urlToResponse);
+        AppState{response_cache: mutex}
     }
 }
 lazy_static! {
@@ -36,8 +54,6 @@ lazy_static! {
     // static ref handle = &Core::new().unwrap().handle();
 }
 
-
-
 fn debug_request(req: Request<Body>) -> Result<Response<Body>, Infallible>  {
     let body_str = format!("{:?}", req);
     Ok(Response::new(Body::from(body_str)))
@@ -45,10 +61,37 @@ fn debug_request(req: Request<Body>) -> Result<Response<Body>, Infallible>  {
 
 async fn delay() {
     // Wait randomly for between 0 and 10 seconds
-    sleep(Duration::from_secs(1)).await;
+    sleep(Duration::from_secs(REQ_TIMEOUT)).await;
 }
 
-async fn handle(client_ip: IpAddr, req: Request<Body>) -> Result<Response<Body>, Infallible> {
+async fn getCachedResponse(url: &Uri) -> Option<CachedResponse> {
+    let response_cache = &APP_STATE.response_cache.read().await;
+
+    if (response_cache.contains_key(url)) {
+        let cached_response = response_cache.get(url).unwrap();
+        if (Instant::now().duration_since(cached_response.time) < Duration::new(MAX_CACHE_TIME_SECS, 0)) {
+            println!("Cache is not old, returning {url} from cache");
+            return Some(cached_response.clone());
+        } else {
+            let url = url.clone();
+            task::spawn(async move {
+                let mut response_cache = APP_STATE.response_cache.write().await;
+                response_cache.remove(&url);
+                println!("Cache is old, removed {url} from cache");
+            });
+        }
+    }
+    return None;
+}
+
+fn build_response(body: &String) -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::INTERNAL_SERVER_ERROR)
+        .body(Body::from(String::from(body)))
+        .unwrap()
+}
+async fn handle(client_ip: IpAddr, req: Request<Body>) -> Result<hyper::Response<Body>, Infallible> {
+    println!("in handle");
     if req.uri().path().starts_with("/escrow") {
         // will forward requests to port 13901
         println!("handing: {}", req.uri().path());
@@ -60,9 +103,22 @@ async fn handle(client_ip: IpAddr, req: Request<Body>) -> Result<Response<Body>,
                                   .unwrap())}
         }
     } else if req.uri().path().starts_with("/slow") {
+        println!("here");
         // let timeout = tokio_core::reactor::Timeout::new(Duration::from_millis(170), &handle).unwrap();
+        let uri_path = &req.uri().path().to_string();
+        let cached_resp = getCachedResponse(uri_path).await;
+        if cached_resp.is_some() {
+            let x = cached_resp.unwrap();
+            return Ok(build_response(&x.body));
+        }
+        
+        println!("no cache found...");
+
+        //FIXME - dont have multiple update cache at same time
         let sleep_statement = task::spawn(delay());
-        let proxy_call = hyper_reverse_proxy::call(client_ip, "http://127.0.0.1:8080", req);
+
+        //let proxy_call = reqwest::get(uri); FIXME
+        let proxy_call = reqwest::get(format!("http://localhost:8080{uri_path}"));
 
         let res = tokio::select! {
             _ = sleep_statement => {
@@ -74,7 +130,29 @@ async fn handle(client_ip: IpAddr, req: Request<Body>) -> Result<Response<Body>,
 
             response = proxy_call => {
                 match response {
-                    Ok(response) => {Ok(response)}
+                    Ok(response) => {
+                        let proxy_text = match response.text().await {
+                            Ok(p) => {p},
+                            Err(_) => {return Ok(Response::builder()
+                                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                .body(Body::from(format!("error response when getting body text from {uri_path}")))
+                                .unwrap())},
+                        };
+
+                        // Update Cache
+                        let uri = uri_path.clone();
+                        let c_body = proxy_text.clone();
+                        task::spawn(async move {
+                            println!("Updating cache!");
+                            let mut response_cache = APP_STATE.response_cache.write().await;
+                            let cached_resp = CachedResponse {
+                                body: c_body,
+                                time: Instant::now()
+                            };
+                            response_cache.insert(uri, cached_resp);
+                        });
+                        Ok(build_response(&proxy_text))
+                    }
                     Err(_error) => {Ok(Response::builder()
                                         .status(StatusCode::INTERNAL_SERVER_ERROR)
                                         .body(Body::from("error response"))
@@ -84,18 +162,6 @@ async fn handle(client_ip: IpAddr, req: Request<Body>) -> Result<Response<Body>,
         };
 
         res
-        // // let mut r1 = APP_STATE.messages.write().await;
-        // // let len = r1.len();
-        // // let str = format!("hey {len}"); 
-        // // will forward requests to port 13901
-        // println!("handing: {}", req.uri().path());
-        // match hyper_reverse_proxy::call(client_ip, "http://127.0.0.1:8080", req).await {
-        //     Ok(response) => {Ok(response)}
-        //     Err(_error) => {Ok(Response::builder()
-        //                           .status(StatusCode::INTERNAL_SERVER_ERROR)
-        //                           .body(Body::empty())
-        //                           .unwrap())}
-        // }
     } else {
         debug_request(req)
     }
@@ -103,7 +169,8 @@ async fn handle(client_ip: IpAddr, req: Request<Body>) -> Result<Response<Body>,
 
 #[tokio::main]
 async fn main() {
-    let bind_addr = "127.0.0.1:8000";
+    let port = 8000;
+    let bind_addr = format!("127.0.0.1:{port}");
     let addr:SocketAddr = bind_addr.parse().expect("Could not parse ip:port.");
 
     let make_svc = make_service_fn(|conn: &AddrStream| {
@@ -115,7 +182,7 @@ async fn main() {
 
     let server = Server::bind(&addr).serve(make_svc);
 
-    println!("Running server on {:?}", addr);
+    println!("Running serverr on {:?}", addr);
 
     if let Err(e) = server.await {
         eprintln!("server error: {}", e);
