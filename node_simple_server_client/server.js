@@ -5,7 +5,7 @@ function sleep(ms) {
 }
 
 const requestListener = async function (req, res) {
-  await sleep(2000);  
+  await sleep(8000);  
   res.writeHead(200);
   const d = new Date();
   res.end('Hello, World! Current Time: ' + d.toLocaleString());
