@@ -1,12 +1,51 @@
+// #![deny(warnings)]
+#[macro_use]
+extern crate lazy_static;
+
+
 use hyper::server::conn::AddrStream;
 use hyper::{Body, Request, Response, Server, StatusCode};
 use hyper::service::{service_fn, make_service_fn};
 use std::{convert::Infallible, net::SocketAddr};
 use std::net::IpAddr;
+use tokio::sync::RwLock;
+use std::time::Duration;
+// use tokio_core::reactor::Core;
+// use tokio_core::reactor::Handle;
+// use futures::Future;
+// use futures::future::Either;
+// use tokio::sync::oneshot;
+// use tokio::time::timeout;
+use tokio::time::sleep;
+use tokio::task;
+
+
+struct AppState {
+    messages: RwLock<Vec<String>>,
+}
+impl AppState {
+    fn new() -> Self {
+        let messages: Vec<String> = Vec::new();
+        let mutex = RwLock::new(messages);
+        AppState{messages: mutex}
+    }
+}
+lazy_static! {
+    // static ref my_mutex: Mutex<i32> = Mutex::new(0i32);
+    static ref APP_STATE: AppState = AppState::new();
+    // static ref handle = &Core::new().unwrap().handle();
+}
+
+
 
 fn debug_request(req: Request<Body>) -> Result<Response<Body>, Infallible>  {
     let body_str = format!("{:?}", req);
     Ok(Response::new(Body::from(body_str)))
+}
+
+async fn delay() {
+    // Wait randomly for between 0 and 10 seconds
+    sleep(Duration::from_secs(1)).await;
 }
 
 async fn handle(client_ip: IpAddr, req: Request<Body>) -> Result<Response<Body>, Infallible> {
@@ -21,15 +60,42 @@ async fn handle(client_ip: IpAddr, req: Request<Body>) -> Result<Response<Body>,
                                   .unwrap())}
         }
     } else if req.uri().path().starts_with("/slow") {
-        // will forward requests to port 13901
-        println!("handing: {}", req.uri().path());
-        match hyper_reverse_proxy::call(client_ip, "http://127.0.0.1:8080", req).await {
-            Ok(response) => {Ok(response)}
-            Err(_error) => {Ok(Response::builder()
-                                  .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                  .body(Body::empty())
-                                  .unwrap())}
-        }
+        // let timeout = tokio_core::reactor::Timeout::new(Duration::from_millis(170), &handle).unwrap();
+        let sleep_statement = task::spawn(delay());
+        let proxy_call = hyper_reverse_proxy::call(client_ip, "http://127.0.0.1:8080", req);
+
+        let res = tokio::select! {
+            _ = sleep_statement => {
+                {Ok(Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Body::from("timed out"))
+                    .unwrap())}
+            },
+
+            response = proxy_call => {
+                match response {
+                    Ok(response) => {Ok(response)}
+                    Err(_error) => {Ok(Response::builder()
+                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                        .body(Body::empty())
+                                        .unwrap())}
+                    }
+                }
+        };
+
+        res
+        // // let mut r1 = APP_STATE.messages.write().await;
+        // // let len = r1.len();
+        // // let str = format!("hey {len}"); 
+        // // will forward requests to port 13901
+        // println!("handing: {}", req.uri().path());
+        // match hyper_reverse_proxy::call(client_ip, "http://127.0.0.1:8080", req).await {
+        //     Ok(response) => {Ok(response)}
+        //     Err(_error) => {Ok(Response::builder()
+        //                           .status(StatusCode::INTERNAL_SERVER_ERROR)
+        //                           .body(Body::empty())
+        //                           .unwrap())}
+        // }
     } else {
         debug_request(req)
     }
