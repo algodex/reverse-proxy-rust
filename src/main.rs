@@ -235,22 +235,26 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
                     let c_body = proxy_text.clone();
                     // Not sure if this should be in its own task
                     task::spawn(async move {
-                        println!("{count}: Updating cache!");
-                        let mut response_cache = APP_STATE.response_cache.write().await;
-                        let cached_resp = CachedResponse {
-                            body: c_body,
-                            time: Instant::now()
-                        };
-                        set_is_fetching_uri(&uri, false).await;
                         let uri_c = uri.clone();
-                        response_cache.insert(uri, cached_resp);
-                        println!("{count}: Inserted into cache!");
+                        println!("{count}: Updating cache!");
+                        {
+                            let mut response_cache = APP_STATE.response_cache.write().await;
+                            let cached_resp = CachedResponse {
+                                body: c_body,
+                                time: Instant::now()
+                            };
+                            set_is_fetching_uri(&uri, false).await;
+                            response_cache.insert(uri, cached_resp);
+                            println!("{count}: Inserted into cache!");
+                        }
 
                         task::spawn(async move {
                             sleep(Duration::from_secs(MAX_CACHE_TIME_SECS)).await;
-                            let mut response_cache = APP_STATE.response_cache.write().await;
-                            response_cache.remove(&uri_c);
-                            println!("Cache is old, removed {uri_c} from cache");
+                            {
+                                let mut response_cache = APP_STATE.response_cache.write().await;
+                                response_cache.remove(&uri_c);
+                                println!("Cache is old, removed {uri_c} from cache");
+                            }
                         });
                     });
                     Ok(build_response(&proxy_text))
