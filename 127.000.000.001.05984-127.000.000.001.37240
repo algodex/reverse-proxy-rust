@@ -1,0 +1,12 @@
+HTTP/1.1 405 Method Not Allowed
+Allow: POST
+Cache-Control: must-revalidate
+Connection: close
+Content-Length: 60
+Content-Type: application/json
+Date: Fri, 19 Aug 2022 21:21:18 GMT
+Server: CouchDB/3.2.2 (Erlang OTP/23)
+X-Couch-Request-ID: fafb66b22b
+X-CouchDB-Body-Time: 0
+
+{"error":"method_not_allowed","reason":"Only POST allowed"}
