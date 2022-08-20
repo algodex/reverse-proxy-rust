@@ -1,8 +1,0 @@
-GET /formatted_escrow/_design/formatted_escrow/_view/epochs/queries HTTP/1.1
-authorization: Basic YWRtaW46ZGV4
-content-type: application/json
-accept: */*
-host: 127.0.0.1:8000
-content-length: 42
-
-{"queries":[{"keys":["2"],"group":false}]}
