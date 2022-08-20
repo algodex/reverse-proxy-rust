@@ -3,7 +3,6 @@
 extern crate lazy_static;
 
 
-// use futures::StreamExt;
 use hyper::server::conn::AddrStream;
 use hyper::{Body, Request, Response, Server, StatusCode, HeaderMap, header};
 use hyper::service::{service_fn, make_service_fn};
@@ -12,27 +11,14 @@ use std::{convert::Infallible, net::SocketAddr};
 use std::net::IpAddr;
 use tokio::sync::RwLock;
 use std::time::Duration;
-// use tokio_core::reactor::Core;
-// use tokio_core::reactor::Handle;
-// use futures::Future;
-// use futures::future::Either;
-// use tokio::sync::oneshot;
-// use tokio::time::timeout;
 use tokio::time::sleep;
 use tokio::task;
 use std::collections::HashMap;
 use tokio::time::Instant;
 use std::collections::HashSet;
 use hyper::{ Method}; // 0.13.9
-use futures::{future, FutureExt, TryStreamExt};
 use hyper::body;
-use std::error::Error;
 use hyper::body::Bytes;
-use futures::StreamExt;
-// let body = reqwest::get("https://www.rust-lang.org")
-//     .await?
-//     .text()
-//     .await?;
 type Uri = String;
 
 
@@ -62,9 +48,7 @@ impl AppState {
     
 }
 lazy_static! {
-    // static ref my_mutex: Mutex<i32> = Mutex::new(0i32);
     static ref APP_STATE: AppState = AppState::new();
-    // static ref handle = &Core::new().unwrap().handle();
 }
 
 fn debug_request(req: Request<Body>) -> Result<Response<Body>, Infallible>  {
@@ -73,7 +57,6 @@ fn debug_request(req: Request<Body>) -> Result<Response<Body>, Infallible>  {
 }
 
 async fn delay() {
-    // Wait randomly for between 0 and 10 seconds
     sleep(Duration::from_secs(REQ_TIMEOUT)).await;
 }
 
@@ -169,19 +152,11 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
     let method = req.method().clone();
     let count = incr_count().await;
     println!("{count}: here");
-    // let timeout = tokio_core::reactor::Timeout::new(Duration::from_millis(170), &handle).unwrap();
     let body = read_json_body(&mut req).await;
     let pathAndQuery = req.uri().path_and_query();
 
     let mut output:Vec<Bytes> = Vec::new();
     
-    // let body_aggr = hyper::body::aggregate(body).await.unwrap();
-    // let s = String::from_utf8_lossy(body_aggr);
-    // match req.read_to_end(&mut body) {
-    //     Ok(_) => println!("{:?}", String::from_utf8_lossy(&*body)),
-    //     Err(why) => panic!("String conversion failure: {:?}", why),
-    // }
-    // let body = get_body_as_vec(body).await.unwrap();
     let query = pathAndQuery.unwrap().query();
     let path = pathAndQuery.unwrap().path();
 
@@ -218,33 +193,16 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
             return Ok(build_response(&"Timed out while getting response".to_string()));
         }
     }
-    // Not currently fetching, so try to fetch and refresh cache
+    // Not currently in cache, so try to fetch and refresh cache
 
-    //FIXME - set is fetching
     set_is_fetching_uri(uri_path, true).await;
 
     let sleep_statement = task::spawn(delay());
 
-    //let proxy_call = reqwest::get(uri); FIXME
-    //let proxy_call = reqwest::get(format!("http://localhost:8080{uri_path}")); //FIXME - dont hardcode to localhost
     let client = reqwest::Client::new();
 
-    let fullURL = format!("http://localhost:5984{uri_path}{queryStr}");
+    let fullURL = format!("http://localhost:5984{uri_path}{queryStr}"); //FIXME dont hardcode to localhost
     println!("full URL: {fullURL}");
-
-    // let proxy_call = reqwest::Request::new(*method, reqwest::Url::parse(&fullURL)
-    //     .unwrap());
-
-    // let created_req = reqwest::Request {
-    //     method,
-    //     url: reqwest::Url::parse(&fullURL).unwrap(),
-    //     headers: headerMap,
-    //     body: Some(body.into()),
-    //     timeout: None,
-    //     version: reqwest::Version::default(),
-    // };
-    // let proxy_call = client.execute(created_req);
-
 
     let proxy_call = get_req(method, client, fullURL, body, headerMap).send();
 
@@ -289,7 +247,7 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
                         println!("{count}: Inserted into cache!");
 
                         task::spawn(async move {
-                            delay().await;
+                            sleep(Duration::from_secs(MAX_CACHE_TIME_SECS)).await;
                             let mut response_cache = APP_STATE.response_cache.write().await;
                             response_cache.remove(&uri_c);
                             println!("Cache is old, removed {uri_c} from cache");
