@@ -201,7 +201,7 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
 
     let client = reqwest::Client::new();
 
-    let fullURL = format!("http://localhost:5984{uri_path}{queryStr}"); //FIXME dont hardcode to localhost
+    let fullURL = format!("http://host.docker.internal:5984{uri_path}{queryStr}"); //FIXME dont hardcode to localhost
     println!("full URL: {fullURL}");
 
     let proxy_call = get_req(method, client, fullURL, body, headerMap).send();
@@ -259,8 +259,8 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
                     });
                     Ok(build_response(&proxy_text))
                 }
-                    Err(_error) => {
-                        println!("error in response from background fetch {uri_path}");
+                    Err(error) => {
+                        println!("error in response from background fetch {uri_path} {error:?}");
                         set_is_fetching_uri(&uri_path, false).await;
                         Ok(Response::builder()
                                     .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -277,7 +277,7 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
 #[tokio::main]
 async fn main() {
     let port = 8000;
-    let bind_addr = format!("127.0.0.1:{port}");
+    let bind_addr = format!("0.0.0.0:{port}");
     let addr:SocketAddr = bind_addr.parse().expect("Could not parse ip:port.");
 
     let make_svc = make_service_fn(|conn: &AddrStream| {
