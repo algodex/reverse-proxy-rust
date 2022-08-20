@@ -104,17 +104,7 @@ async fn getCachedResponse(url: &Uri) -> Option<CachedResponse> {
 
     if (response_cache.contains_key(url)) {
         let cached_response = response_cache.get(url).unwrap();
-        if (Instant::now().duration_since(cached_response.time) < Duration::new(MAX_CACHE_TIME_SECS, 0)) {
-            println!("Cache is not old, returning {url} from cache");
-            return Some(cached_response.clone());
-        } else {
-            let url = url.clone();
-            task::spawn(async move {
-                let mut response_cache = APP_STATE.response_cache.write().await;
-                response_cache.remove(&url);
-                println!("Cache is old, removed {url} from cache");
-            });
-        }
+        return Some(cached_response.clone());
     }
     return None;
 }
@@ -209,6 +199,7 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
     let uri_path = &req.uri().path().to_string();
     let cached_resp = getCachedResponse(uri_path).await;
     if cached_resp.is_some() {
+        println!("{count} Returning from cache!");
         let x = cached_resp.unwrap();
         return Ok(build_response(&x.body));
     }
@@ -293,7 +284,16 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
                             time: Instant::now()
                         };
                         set_is_fetching_uri(&uri, false).await;
+                        let uri_c = uri.clone();
                         response_cache.insert(uri, cached_resp);
+                        println!("{count}: Inserted into cache!");
+
+                        task::spawn(async move {
+                            delay().await;
+                            let mut response_cache = APP_STATE.response_cache.write().await;
+                            response_cache.remove(&uri_c);
+                            println!("Cache is old, removed {uri_c} from cache");
+                        });
                     });
                     Ok(build_response(&proxy_text))
                 }
