@@ -291,7 +291,7 @@ async fn main() {
 
     let server = Server::bind(&addr).serve(make_svc);
 
-    println!("Running serverr on {:?}", addr);
+    println!("Running server on {:?}", addr);
 
     if let Err(e) = server.await {
         eprintln!("server error: {}", e);
