@@ -9,12 +9,16 @@ services:
       - "8080:80"
     command: 'bash -c "cat /etc/nginx/conf.d/proxy.template > /etc/nginx/conf.d/default.conf && nginx -g ''daemon off;''"'
   reverse-proxy:
+    volumes:
+      - ./.env:/.env
     build: .
     ports:
       - "8000:8000"
     entrypoint: "./target/release/reverse_proxy_test"
     # command: 
   api:
+    volumes:
+      - ./.env:/.env
     build: 
       context: .
       dockerfile: Dockerfile.api
