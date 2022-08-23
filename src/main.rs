@@ -22,9 +22,6 @@ use hyper::body::Bytes;
 type Uri = String;
 
 
-const MAX_CACHE_TIME_SECS: u64 = 3;
-const REQ_TIMEOUT: u64 = 5;
-
 #[derive(Clone, Debug)]
 struct CachedResponse {
     body: String,
@@ -49,6 +46,10 @@ impl AppState {
 }
 lazy_static! {
     static ref APP_STATE: AppState = AppState::new();
+    static ref ENV: RwLock<HashMap<String, String>> = {
+        let mut m = HashMap::new();
+        RwLock::new(m)
+    };
 }
 
 fn debug_request(req: Request<Body>) -> Result<Response<Body>, Infallible>  {
@@ -57,7 +58,9 @@ fn debug_request(req: Request<Body>) -> Result<Response<Body>, Infallible>  {
 }
 
 async fn delay() {
-    sleep(Duration::from_secs(REQ_TIMEOUT)).await;
+    let env = ENV.read().await;
+    let timeout = env.get("REQ_TIMEOUT").unwrap().parse::<u64>().unwrap();
+    sleep(Duration::from_secs(timeout)).await;
 }
 
 
@@ -220,7 +223,7 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
         response = proxy_call => {
             match response {
                 Ok(response) => {
-                    //dbg!(&response);
+                    dbg!(&response);
                     let proxy_text = match response.text().await {
                         Ok(p) => {
                             println!("FULL RESPONSE:{}", p);
@@ -251,7 +254,9 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
                         }
 
                         task::spawn(async move {
-                            sleep(Duration::from_secs(MAX_CACHE_TIME_SECS)).await;
+                            let env = ENV.read().await;
+                            let max_cache_time = env.get("MAX_CACHE_TIME_SECS").unwrap().parse::<u64>().unwrap();
+                            sleep(Duration::from_secs(max_cache_time)).await;
                             {
                                 let mut response_cache = APP_STATE.response_cache.write().await;
                                 response_cache.remove(&uri_c);
@@ -278,6 +283,14 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
 
 #[tokio::main]
 async fn main() {
+    dotenv::from_filename(".env").expect(".env file can't be found!");
+    {
+        let mut env = ENV.write().await;
+        dotenv::vars().for_each(|val| {
+            env.insert(val.0, val.1);
+        });
+    }
+
     let port = 8000;
     let bind_addr = format!("0.0.0.0:{port}");
     let addr:SocketAddr = bind_addr.parse().expect("Could not parse ip:port.");
