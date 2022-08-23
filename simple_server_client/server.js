@@ -12,6 +12,7 @@ const requestListener = async function (req, res) {
 }
 
 const server = http.createServer(requestListener);
-console.log('listening on 8080');
-server.listen(8080);
+const port = 6000;
+console.log('listening on ' + port);
+server.listen(port);
 

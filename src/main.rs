@@ -130,11 +130,11 @@ pub async fn read_json_body(req: &mut Request<Body>) -> String {
 fn get_req(method: Method, client: reqwest::Client, fullURL: String, body: String, headerMap: HeaderMap) -> RequestBuilder
     {
     let proxy_call = match method {
-        POST => {
+        Method::POST => {
             client.post(fullURL)
             .body(body).headers(headerMap)
         },
-        GET => {
+        Method::GET => {
             client.get(fullURL)
             .body(body).headers(headerMap)
         },
@@ -201,7 +201,8 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
 
     let client = reqwest::Client::new();
 
-    let fullURL = format!("http://host.docker.internal:5984{uri_path}{queryStr}"); //FIXME dont hardcode to localhost
+    //http://host.docker.internal:5984{uri_path}{queryStr}"
+    let fullURL = format!("http://api:4000{uri_path}{queryStr}");
     println!("full URL: {fullURL}");
 
     let proxy_call = get_req(method, client, fullURL, body, headerMap).send();
@@ -219,6 +220,7 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
         response = proxy_call => {
             match response {
                 Ok(response) => {
+                    //dbg!(&response);
                     let proxy_text = match response.text().await {
                         Ok(p) => {
                             println!("FULL RESPONSE:{}", p);

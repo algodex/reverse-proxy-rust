@@ -12,4 +12,13 @@ services:
     build: .
     ports:
       - "8000:8000"
-    command: "./target/release/reverse_proxy_test"
+    entrypoint: "./target/release/reverse_proxy_test"
+    # command: 
+  api:
+    build: 
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "4000:4000"
+    entrypoint: "./target/release/api"
+    # command: 
