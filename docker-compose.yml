@@ -16,13 +16,3 @@ services:
       - "8000:8000"
     entrypoint: "./target/release/reverse_proxy_test"
     # command: 
-  api:
-    volumes:
-      - ./.env:/.env
-    build: 
-      context: .
-      dockerfile: Dockerfile.api
-    ports:
-      - "4000:4000"
-    entrypoint: "./target/release/api"
-    # command: 

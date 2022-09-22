@@ -205,7 +205,7 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
     let client = reqwest::Client::new();
 
     //http://host.docker.internal:5984{uri_path}{queryStr}"
-    let fullURL = format!("http://api:4000{uri_path}{queryStr}");
+    let fullURL = format!("http://host.docker.internal:3006{uri_path}{queryStr}");
     println!("full URL: {fullURL}");
 
     let proxy_call = get_req(method, client, fullURL, body, headerMap).send();
