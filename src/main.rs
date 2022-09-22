@@ -152,6 +152,36 @@ fn get_req(
     proxy_call
 }
 
+/// Clears the cache for a URL. CLEAR_CACHE_KEY must be set in the env.
+/// Example: 
+/// curl http://localhost:8000/trades/history/asset/31566704 -H 'Clear-Cache: True' -H 'Clear-Cache-Key: MySecretKey'
+
+async fn clear_cache(mut req: Request<Body>) -> Result<hyper::Response<Body>, Infallible> {
+    let header_map = req.headers();
+    let header_clear_cache_key = header_map.get("clear-cache-key");
+    let env = ENV.read().await;
+    let clear_cache_key = env.get("CLEAR_CACHE_KEY").unwrap();
+    if (header_clear_cache_key.is_none() ||
+        header_clear_cache_key.unwrap().to_str().unwrap() != clear_cache_key) {
+        return Ok(Response::builder()
+            .status(StatusCode::UNAUTHORIZED)
+            .body(Body::from("Unauthorized"))
+            .unwrap());
+    }
+
+    let clear_cache_url = &req.uri().path().to_string();
+
+    let mut response_cache = APP_STATE.response_cache.write().await;
+    response_cache.remove(clear_cache_url);
+    println!("Deleted {clear_cache_url} from cache");
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .body(Body::from(format!("Cleared Cache for {clear_cache_url}")))
+        .unwrap())
+  
+}
+
 async fn handle(
     _client_ip: IpAddr,
     mut req: Request<Body>,
@@ -171,6 +201,11 @@ async fn handle(
 
     let headerMap: HeaderMap = req.headers().clone();
     println!("HEADERS: {:?}", headerMap);
+    //HEADERS: {"host": "localhost:8000", "user-agent": "curl/7.79.1", "accept": "*/*", "clear-cache": "True", "clear-cache-key": "Alex"}
+
+    if (headerMap.contains_key("clear-cache")) {
+        return clear_cache(req).await;
+    }
     println!("PATH: {path}");
     println!("BODY: {body:?}");
     let queryStr = match query {
