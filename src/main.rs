@@ -209,8 +209,11 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
 
     let client = reqwest::Client::new();
 
+    let env = ENV.read().await;
+    let upstream_url = env.get("UPSTREAM_URL").unwrap();
+
     //http://host.docker.internal:5984{uri_path}{queryStr}"
-    let fullURL = format!("http://host.docker.internal:3006{uri_path}{queryStr}");
+    let fullURL = format!("{upstream_url}{uri_path}{queryStr}");
     println!("full URL: {fullURL}");
 
     let proxy_call = get_req(method, client, fullURL, body, headerMap).send();
@@ -232,7 +235,7 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
                     let resp_headers = response.headers().clone();
                     let proxy_text = match response.text().await {
                         Ok(p) => {
-                            println!("FULL RESPONSE:{}", p);
+                            // println!("FULL RESPONSE:{}", p);
                             p
                         },
                         Err(_) => {return Ok(Response::builder()
@@ -262,8 +265,8 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
 
                         task::spawn(async move {
                             let env = ENV.read().await;
-                            let max_cache_time = env.get("MAX_CACHE_TIME_SECS").unwrap().parse::<u64>().unwrap();
-                            sleep(Duration::from_secs(max_cache_time)).await;
+                            let cache_expiry_time = env.get("DEFAULT_CACHE_EXPIRY_TIME_SECS").unwrap().parse::<u64>().unwrap();
+                            sleep(Duration::from_secs(cache_expiry_time)).await;
                             {
                                 let mut response_cache = APP_STATE.response_cache.write().await;
                                 response_cache.remove(&uri_c);
