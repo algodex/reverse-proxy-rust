@@ -25,6 +25,7 @@ type Uri = String;
 #[derive(Clone, Debug)]
 struct CachedResponse {
     body: String,
+    resp_headers: HeaderMap,
     time: Instant
 }
 
@@ -95,11 +96,15 @@ async fn getCachedResponse(url: &Uri) -> Option<CachedResponse> {
     return None;
 }
 
-fn build_response(body: &String) -> Response<Body> {
-    Response::builder()
-        .status(StatusCode::OK)
-        .body(Body::from(String::from(body)))
-        .unwrap()
+fn build_response(body: &String, headers: &HeaderMap) -> Response<Body> {
+    let mut builder = Response::builder()
+        .status(StatusCode::OK);
+
+    for header_key in headers.keys() {
+        builder = builder.header(header_key, headers.get(header_key).unwrap());
+    }
+
+    builder.body(Body::from(String::from(body))).unwrap()
 }
 
 async fn incr_count() -> u32 {
@@ -179,7 +184,7 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
     if cached_resp.is_some() {
         println!("{count} Returning from cache!");
         let x = cached_resp.unwrap();
-        return Ok(build_response(&x.body));
+        return Ok(build_response(&x.body, &x.resp_headers));
     }
     
     println!("{count}: no cache found... {uri_path}");
@@ -191,9 +196,9 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
         println!("{count}: got read lock");
         if cached_resp.is_some() {
             let x = cached_resp.unwrap();
-            return Ok(build_response(&x.body));
+            return Ok(build_response(&x.body, &x.resp_headers));
         } else {
-            return Ok(build_response(&"Timed out while getting response".to_string()));
+            return Ok(build_response(&"Timed out while getting response".to_string(), &HeaderMap::new()));
         }
     }
     // Not currently in cache, so try to fetch and refresh cache
@@ -205,7 +210,7 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
     let client = reqwest::Client::new();
 
     //http://host.docker.internal:5984{uri_path}{queryStr}"
-    let fullURL = format!("http://api:4000{uri_path}{queryStr}");
+    let fullURL = format!("http://host.docker.internal:3006{uri_path}{queryStr}");
     println!("full URL: {fullURL}");
 
     let proxy_call = get_req(method, client, fullURL, body, headerMap).send();
@@ -224,6 +229,7 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
             match response {
                 Ok(response) => {
                     dbg!(&response);
+                    let resp_headers = response.headers().clone();
                     let proxy_text = match response.text().await {
                         Ok(p) => {
                             println!("FULL RESPONSE:{}", p);
@@ -234,10 +240,10 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
                             .body(Body::from(format!("error response when getting body text from {uri_path}")))
                             .unwrap())},
                     };
-
                     // Update Cache
                     let uri = uri_path.clone();
                     let c_body = proxy_text.clone();
+                    let c_resp_headers = resp_headers.clone();
                     // Not sure if this should be in its own task
                     task::spawn(async move {
                         let uri_c = uri.clone();
@@ -246,6 +252,7 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
                             let mut response_cache = APP_STATE.response_cache.write().await;
                             let cached_resp = CachedResponse {
                                 body: c_body,
+                                resp_headers: c_resp_headers,
                                 time: Instant::now()
                             };
                             set_is_fetching_uri(&uri, false).await;
@@ -264,7 +271,7 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
                             }
                         });
                     });
-                    Ok(build_response(&proxy_text))
+                    Ok(build_response(&proxy_text, &resp_headers))
                 }
                     Err(error) => {
                         println!("error in response from background fetch {uri_path} {error:?}");
