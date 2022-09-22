@@ -2,58 +2,59 @@
 #[macro_use]
 extern crate lazy_static;
 
-
-use hyper::server::conn::AddrStream;
-use hyper::{Body, Request, Response, Server, StatusCode, HeaderMap, header};
-use hyper::service::{service_fn, make_service_fn};
-use reqwest::RequestBuilder;
-use std::{convert::Infallible, net::SocketAddr};
-use std::net::IpAddr;
-use tokio::sync::RwLock;
-use std::time::Duration;
-use tokio::time::sleep;
-use tokio::task;
-use std::collections::HashMap;
-use tokio::time::Instant;
-use std::collections::HashSet;
-use hyper::{ Method}; // 0.13.9
 use hyper::body;
 use hyper::body::Bytes;
+use hyper::server::conn::AddrStream;
+use hyper::service::{make_service_fn, service_fn};
+use hyper::Method; // 0.13.9
+use hyper::{Body, HeaderMap, Request, Response, Server, StatusCode};
+use reqwest::RequestBuilder;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::net::IpAddr;
+use std::time::Duration;
+use std::{convert::Infallible, net::SocketAddr};
+use tokio::sync::RwLock;
+use tokio::task;
+use tokio::time::sleep;
+use tokio::time::Instant;
 type Uri = String;
-
 
 #[derive(Clone, Debug)]
 struct CachedResponse {
     body: String,
     resp_headers: HeaderMap,
-    time: Instant
+    time: Instant,
 }
 
 struct AppState {
-    response_cache: RwLock<HashMap<Uri,CachedResponse>>,
+    response_cache: RwLock<HashMap<Uri, CachedResponse>>,
     is_fetching_set: RwLock<HashSet<Uri>>,
-    count: RwLock<u32>
+    count: RwLock<u32>,
 }
 impl AppState {
     fn new() -> Self {
-        let urlToResponse: HashMap<Uri,CachedResponse> = HashMap::new();
+        let urlToResponse: HashMap<Uri, CachedResponse> = HashMap::new();
         let is_fetching_set: HashSet<Uri> = HashSet::new();
         let mutex = RwLock::new(urlToResponse);
         let countMutex = RwLock::new(0);
         let is_fetching_set = RwLock::new(is_fetching_set);
-        AppState{response_cache: mutex, count: countMutex, is_fetching_set}
+        AppState {
+            response_cache: mutex,
+            count: countMutex,
+            is_fetching_set,
+        }
     }
-    
 }
 lazy_static! {
     static ref APP_STATE: AppState = AppState::new();
     static ref ENV: RwLock<HashMap<String, String>> = {
-        let mut m = HashMap::new();
+        let m = HashMap::new();
         RwLock::new(m)
     };
 }
 
-fn debug_request(req: Request<Body>) -> Result<Response<Body>, Infallible>  {
+fn debug_request(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     let body_str = format!("{:?}", req);
     Ok(Response::new(Body::from(body_str)))
 }
@@ -64,15 +65,14 @@ async fn delay() {
     sleep(Duration::from_secs(timeout)).await;
 }
 
-
 async fn getCachedResponseLoop(url: &Uri) -> Option<CachedResponse> {
     loop {
         let response = getCachedResponse(url).await;
         match response {
             Some(val) => {
                 return Some(val);
-            },
-            None => sleep(Duration::from_millis(250)).await
+            }
+            None => sleep(Duration::from_millis(250)).await,
         }
     }
 }
@@ -89,7 +89,7 @@ async fn getCachedResponseOrTimeout(url: &Uri) -> Option<CachedResponse> {
 async fn getCachedResponse(url: &Uri) -> Option<CachedResponse> {
     let response_cache = &APP_STATE.response_cache.read().await;
 
-    if (response_cache.contains_key(url)) {
+    if response_cache.contains_key(url) {
         let cached_response = response_cache.get(url).unwrap();
         return Some(cached_response.clone());
     }
@@ -97,8 +97,7 @@ async fn getCachedResponse(url: &Uri) -> Option<CachedResponse> {
 }
 
 fn build_response(body: &String, headers: &HeaderMap) -> Response<Body> {
-    let mut builder = Response::builder()
-        .status(StatusCode::OK);
+    let mut builder = Response::builder().status(StatusCode::OK);
 
     for header_key in headers.keys() {
         builder = builder.header(header_key, headers.get(header_key).unwrap());
@@ -120,7 +119,7 @@ async fn is_fetching_uri(uri: &String) -> bool {
 
 async fn set_is_fetching_uri(uri: &String, is_fetching: bool) {
     let mut is_fetching_set = APP_STATE.is_fetching_set.write().await;
-    if (is_fetching) {
+    if is_fetching {
         is_fetching_set.insert(uri.clone());
     } else {
         is_fetching_set.remove(uri);
@@ -128,33 +127,35 @@ async fn set_is_fetching_uri(uri: &String, is_fetching: bool) {
 }
 
 pub async fn read_json_body(req: &mut Request<Body>) -> String {
-    let mut body = req.body_mut();
+    let body = req.body_mut();
     let bytes = body::to_bytes(body).await.unwrap();
     let body_str = String::from_utf8(Vec::from(&*bytes)).unwrap();
     body_str
 }
 
-// Box<dyn core::future::Future<Output = Result<reqwest::Response, reqwest::Error>>> 
-fn get_req(method: Method, client: reqwest::Client, fullURL: String, body: String, headerMap: HeaderMap) -> RequestBuilder
-    {
+// Box<dyn core::future::Future<Output = Result<reqwest::Response, reqwest::Error>>>
+fn get_req(
+    method: Method,
+    client: reqwest::Client,
+    fullURL: String,
+    body: String,
+    headerMap: HeaderMap,
+) -> RequestBuilder {
     let proxy_call = match method {
-        Method::POST => {
-            client.post(fullURL)
-            .body(body).headers(headerMap)
-        },
-        Method::GET => {
-            client.get(fullURL)
-            .body(body).headers(headerMap)
-        },
-        _ => { //FIXME - add other types? Or return error?           
-            client.get(fullURL)
-            .body(body).headers(headerMap)
+        Method::POST => client.post(fullURL).body(body).headers(headerMap),
+        Method::GET => client.get(fullURL).body(body).headers(headerMap),
+        _ => {
+            //FIXME - add other types? Or return error?
+            client.get(fullURL).body(body).headers(headerMap)
         }
     };
     proxy_call
 }
 
-async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Response<Body>, Infallible> {
+async fn handle(
+    _client_ip: IpAddr,
+    mut req: Request<Body>,
+) -> Result<hyper::Response<Body>, Infallible> {
     println!("in handle");
 
     let method = req.method().clone();
@@ -163,8 +164,8 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
     let body = read_json_body(&mut req).await;
     let pathAndQuery = req.uri().path_and_query();
 
-    let mut output:Vec<Bytes> = Vec::new();
-    
+    let _output: Vec<Bytes> = Vec::new();
+
     let query = pathAndQuery.unwrap().query();
     let path = pathAndQuery.unwrap().path();
 
@@ -174,7 +175,7 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
     println!("BODY: {body:?}");
     let queryStr = match query {
         Some(q) => format!("?{q}"),
-        None => "".to_string()
+        None => "".to_string(),
     };
     if let Some(q) = query {
         println!("QUERY: {q}");
@@ -186,11 +187,11 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
         let x = cached_resp.unwrap();
         return Ok(build_response(&x.body, &x.resp_headers));
     }
-    
+
     println!("{count}: no cache found... {uri_path}");
     let is_fetching = is_fetching_uri(&uri_path).await;
 
-    if (is_fetching) {
+    if is_fetching {
         println!("{count}: could not get write lock. waiting for read lock");
         let cached_resp = getCachedResponseOrTimeout(uri_path).await;
         println!("{count}: got read lock");
@@ -198,7 +199,10 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
             let x = cached_resp.unwrap();
             return Ok(build_response(&x.body, &x.resp_headers));
         } else {
-            return Ok(build_response(&"Timed out while getting response".to_string(), &HeaderMap::new()));
+            return Ok(build_response(
+                &"Timed out while getting response".to_string(),
+                &HeaderMap::new(),
+            ));
         }
     }
     // Not currently in cache, so try to fetch and refresh cache
@@ -209,8 +213,11 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
 
     let client = reqwest::Client::new();
 
+    let env = ENV.read().await;
+    let upstream_url = env.get("UPSTREAM_URL").unwrap();
+
     //http://host.docker.internal:5984{uri_path}{queryStr}"
-    let fullURL = format!("http://host.docker.internal:3006{uri_path}{queryStr}");
+    let fullURL = format!("{upstream_url}{uri_path}{queryStr}");
     println!("full URL: {fullURL}");
 
     let proxy_call = get_req(method, client, fullURL, body, headerMap).send();
@@ -232,7 +239,7 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
                     let resp_headers = response.headers().clone();
                     let proxy_text = match response.text().await {
                         Ok(p) => {
-                            println!("FULL RESPONSE:{}", p);
+                            // println!("FULL RESPONSE:{}", p);
                             p
                         },
                         Err(_) => {return Ok(Response::builder()
@@ -262,8 +269,8 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
 
                         task::spawn(async move {
                             let env = ENV.read().await;
-                            let max_cache_time = env.get("MAX_CACHE_TIME_SECS").unwrap().parse::<u64>().unwrap();
-                            sleep(Duration::from_secs(max_cache_time)).await;
+                            let cache_expiry_time = env.get("DEFAULT_CACHE_EXPIRY_TIME_SECS").unwrap().parse::<u64>().unwrap();
+                            sleep(Duration::from_secs(cache_expiry_time)).await;
                             {
                                 let mut response_cache = APP_STATE.response_cache.write().await;
                                 response_cache.remove(&uri_c);
@@ -285,7 +292,6 @@ async fn handle(_client_ip: IpAddr, mut req: Request<Body>) -> Result<hyper::Res
     };
 
     res
-    
 }
 
 #[tokio::main]
@@ -300,15 +306,11 @@ async fn main() {
 
     let port = 8000;
     let bind_addr = format!("0.0.0.0:{port}");
-    let addr:SocketAddr = bind_addr.parse().expect("Could not parse ip:port.");
+    let addr: SocketAddr = bind_addr.parse().expect("Could not parse ip:port.");
 
     let make_svc = make_service_fn(|conn: &AddrStream| {
         let remote_addr = conn.remote_addr().ip();
-        async move {
-            Ok::<_, Infallible>(service_fn(move |mut req| {
-                handle(remote_addr, req)
-            }))
-        }
+        async move { Ok::<_, Infallible>(service_fn(move |req| handle(remote_addr, req))) }
     });
 
     let server = Server::bind(&addr).serve(make_svc);
@@ -319,4 +321,3 @@ async fn main() {
         eprintln!("server error: {}", e);
     }
 }
-
