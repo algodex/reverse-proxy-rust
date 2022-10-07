@@ -8,6 +8,10 @@ Reverse proxy for serving web requests to the 2.0 Algodex backend. This uses asy
 
 `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 
+### Copy and configure .env file
+
+`cp .env.example .env`
+
 ### Build 
 
 `cargo build`
