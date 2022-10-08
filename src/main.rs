@@ -206,7 +206,6 @@ async fn handle(
 
     let headerMap: HeaderMap = req.headers().clone();
     println!("HEADERS: {:?}", headerMap);
-    //HEADERS: {"host": "localhost:8000", "user-agent": "curl/7.79.1", "accept": "*/*", "clear-cache": "True", "clear-cache-key": "Alex"}
 
     if (headerMap.contains_key("clear-cache")) {
         return clear_cache(req).await;
