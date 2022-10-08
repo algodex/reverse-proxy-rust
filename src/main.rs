@@ -1,4 +1,9 @@
 // #![deny(warnings)]
+
+// Author: Alexander Trefonas
+// Copyright (c) 2022 Algodex VASP (BVI) Corp
+// MIT License
+
 #[macro_use]
 extern crate lazy_static;
 
