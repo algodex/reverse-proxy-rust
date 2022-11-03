@@ -23,6 +23,6 @@ This also features a Docker setup with nginx in front, which allows further conf
 
 `cargo build --release`
 
-## Running
+## Build and Run In Docker
 
 `./start.sh`
