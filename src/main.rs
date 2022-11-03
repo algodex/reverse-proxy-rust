@@ -9,6 +9,7 @@ extern crate lazy_static;
 
 use hyper::body;
 use hyper::body::Bytes;
+use hyper::http::HeaderValue;
 use hyper::server::conn::AddrStream;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::Method; // 0.13.9
@@ -101,15 +102,33 @@ async fn getCachedResponse(url: &Uri) -> Option<CachedResponse> {
     return None;
 }
 
-fn build_response(body: &String, headers: &HeaderMap) -> Response<Body> {
-    let mut builder = Response::builder().status(StatusCode::OK);
-
+fn build_response(body: &String, headers: &HeaderMap, request_etag: &Option<&HeaderValue>) -> Response<Body> {
+    let status_code = match request_etag {
+        None => StatusCode::OK,
+        Some(req_etag) => {
+            let mut status_code:StatusCode;
+            if (headers.contains_key("etag") &&
+                req_etag.to_str().unwrap() == headers.get("etag").unwrap().to_str().unwrap()) {
+                status_code = StatusCode::from_u16(304).unwrap();
+            } else {
+                status_code = StatusCode::OK;
+            }
+            status_code
+        }
+    };
+    let mut builder = Response::builder().status(status_code);
     for header_key in headers.keys() {
         builder = builder.header(header_key, headers.get(header_key).unwrap());
     }
 
-    builder.body(Body::from(String::from(body))).unwrap()
+    let body = match status_code.as_u16() {
+        304 => String::from(""),
+        _ => String::from(body)
+    };
+
+    builder.body(Body::from(body)).unwrap()
 }
+
 
 async fn incr_count() -> u32 {
     let mut w = APP_STATE.count.write().await;
@@ -207,6 +226,8 @@ async fn handle(
     let headerMap: HeaderMap = req.headers().clone();
     println!("HEADERS: {:?}", headerMap);
 
+    let request_etag = req.headers().get("if-none-match");
+
     if (headerMap.contains_key("clear-cache")) {
         return clear_cache(req).await;
     }
@@ -224,7 +245,7 @@ async fn handle(
     if cached_resp.is_some() {
         println!("{count} Returning from cache!");
         let x = cached_resp.unwrap();
-        return Ok(build_response(&x.body, &x.resp_headers));
+        return Ok(build_response(&x.body, &x.resp_headers, &request_etag));
     }
 
     println!("{count}: no cache found... {uri_path}");
@@ -236,11 +257,12 @@ async fn handle(
         println!("{count}: got read lock");
         if cached_resp.is_some() {
             let x = cached_resp.unwrap();
-            return Ok(build_response(&x.body, &x.resp_headers));
+            return Ok(build_response(&x.body, &x.resp_headers, &request_etag));
         } else {
             return Ok(build_response(
                 &"Timed out while getting response".to_string(),
                 &HeaderMap::new(),
+                &request_etag
             ));
         }
     }
@@ -259,7 +281,9 @@ async fn handle(
     let fullURL = format!("{upstream_url}{uri_path}{queryStr}");
     println!("full URL: {fullURL}");
 
-    let proxy_call = get_req(method, client, fullURL, body, headerMap).send();
+    let mut header_map_temp = headerMap.clone();
+    header_map_temp.remove("if-none-match"); // We want upstream URLs to fetch full response
+    let proxy_call = get_req(method, client, fullURL, body, header_map_temp).send();
 
     let res = tokio::select! {
         _ = sleep_statement => {
@@ -317,15 +341,15 @@ async fn handle(
                             }
                         });
                     });
-                    Ok(build_response(&proxy_text, &resp_headers))
+                    Ok(build_response(&proxy_text, &resp_headers, &request_etag))
                 }
-                    Err(error) => {
-                        println!("error in response from background fetch {uri_path} {error:?}");
-                        set_is_fetching_uri(&uri_path, false).await;
-                        Ok(Response::builder()
-                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                    .body(Body::from("error response"))
-                                    .unwrap())}
+                Err(error) => {
+                    println!("error in response from background fetch {uri_path} {error:?}");
+                    set_is_fetching_uri(&uri_path, false).await;
+                    Ok(Response::builder()
+                                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                .body(Body::from("error response"))
+                                .unwrap())}
                 }
             }
     };
