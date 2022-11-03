@@ -102,23 +102,24 @@ async fn getCachedResponse(url: &Uri) -> Option<CachedResponse> {
     return None;
 }
 
-fn build_response(body: &String, headers: &HeaderMap, request_etag: &Option<&HeaderValue>) -> Response<Body> {
+fn build_response(body: &String, resp_headers: &HeaderMap, request_etag: &Option<&HeaderValue>) -> Response<Body> {
     let status_code = match request_etag {
         None => StatusCode::OK,
         Some(req_etag) => {
-            let mut status_code:StatusCode;
-            if (headers.contains_key("etag") &&
-                req_etag.to_str().unwrap() == headers.get("etag").unwrap().to_str().unwrap()) {
-                status_code = StatusCode::from_u16(304).unwrap();
+            let status_code =
+            if (resp_headers.contains_key("etag") &&
+                  req_etag.to_str().unwrap() == resp_headers.get("etag").unwrap().to_str().unwrap()) {
+
+                StatusCode::from_u16(304).unwrap()
             } else {
-                status_code = StatusCode::OK;
-            }
+                StatusCode::OK
+            };
             status_code
         }
     };
     let mut builder = Response::builder().status(status_code);
-    for header_key in headers.keys() {
-        builder = builder.header(header_key, headers.get(header_key).unwrap());
+    for header_key in resp_headers.keys() {
+        builder = builder.header(header_key, resp_headers.get(header_key).unwrap());
     }
 
     let body = match status_code.as_u16() {
