@@ -266,7 +266,7 @@ async fn clear_cache(mut req: Request<Body>) -> Result<hyper::Response<Body>, In
 
     let clear_cache_url = &req.uri().path().to_string();
 
-    let mut response_cache = APP_STATE.uri_cache.write().await;
+    let mut response_cache = APP_STATE.uri_cache.read().await;
 
     let cache_item = response_cache.get(clear_cache_url);
     if cache_item.is_some() && cache_item.unwrap().is_fetching {
@@ -277,7 +277,7 @@ async fn clear_cache(mut req: Request<Body>) -> Result<hyper::Response<Body>, In
             .unwrap());
     }
 
-    response_cache.remove(clear_cache_url);
+    update_cache(&DeleteCache(clear_cache_url.to_string())).await;
     println!("Deleted {clear_cache_url} from cache");
 
     Ok(Response::builder()
@@ -419,6 +419,7 @@ async fn handle(
                             let cache_expiry_time = env.get("DEFAULT_CACHE_EXPIRY_TIME_SECS").unwrap().parse::<u64>().unwrap();
                             sleep(Duration::from_secs(cache_expiry_time)).await;
                             {
+                                println!("Clearing old cache for: {uri}");
                                 update_cache(&DeleteCache(uri)).await;
                             }
                         });
