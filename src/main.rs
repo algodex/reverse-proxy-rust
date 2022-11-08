@@ -35,7 +35,18 @@ struct UriEntry {
     is_fetching: bool,
     resp_headers: Option<HeaderMap>,
     fetch_complete_time: Option<Instant>,
-    last_req_time: Instant
+    last_req_time: Instant,
+    request_params: RequestParams
+}
+
+#[derive(Clone, Debug)]
+struct RequestParams {
+    uri: String,
+    queryStr: String,
+    headerMap:HeaderMap,
+    method:Method,
+    body:String,
+    request_etag: Option<HeaderValue>
 }
 
 #[derive(Clone, Debug)]
@@ -46,7 +57,7 @@ struct UpdateCacheEntry {
 
 #[derive(Clone, Debug)]
 enum UriCacheUpdateMessage {
-    StartFetching(String),
+    StartFetching(String, RequestParams),
     DeleteOrRefreshCache(String),
     FinishFetchingWithSuccess(String, UpdateCacheEntry),
     FinishFetchingWithError(String),
@@ -88,7 +99,7 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
     let mut uri_cache = APP_STATE.uri_cache.write().await;
 
     match msg {
-        StartFetching(uri) => {
+        StartFetching(uri, req_params) => {
             println!("StartFetching: {uri}");
             let entry = UriEntry {
                 response_body: None,
@@ -96,7 +107,8 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
                 response_success: None,
                 resp_headers: None,
                 fetch_complete_time: None,
-                last_req_time: Instant::now()
+                last_req_time: Instant::now(),
+                request_params: (*req_params).clone()
             };
             uri_cache.insert(uri.to_string(), entry);
         }
@@ -111,13 +123,8 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
         },
         FinishFetchingWithSuccess(uri, update_cache_entry) => {
             println!("FinishFetchingWithSuccess: {uri}");
-            let current_item = uri_cache.get(uri);
-            let last_req_time = if current_item.is_some() {
-                println!("Unexpected condition for FinishFetchingWithSuccess! setting last req time to now");
-                current_item.unwrap().last_req_time
-            } else {
-                Instant::now()
-            };
+            let current_item = uri_cache.get(uri)
+                .expect("Expected a cached item, but did not find one. Accidentally deleted? {uri}");
 
             let entry = UriEntry {
                 response_body: update_cache_entry.response_body.clone(),
@@ -125,19 +132,15 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
                 is_fetching: false,
                 resp_headers: update_cache_entry.resp_headers.clone(),
                 fetch_complete_time: Some(Instant::now()),
-                last_req_time
+                last_req_time: current_item.last_req_time,
+                request_params: current_item.request_params.clone()
             };
             uri_cache.insert(uri.to_string(), entry);
         },
         FinishFetchingWithError(uri) => {
             println!("FinishFetchingWithError: {uri}");
-            let current_item = uri_cache.get(uri);
-            let last_req_time = if current_item.is_some() {
-                current_item.unwrap().last_req_time
-            } else {
-                println!("Unexpected condition for FinishFetchingWithError! setting last req time to now");
-                Instant::now()
-            };
+            let current_item = uri_cache.get(uri)
+                .expect("Expected a cached item, but did not find one. Accidentally deleted? {uri}");
 
             let entry = UriEntry {
                 response_body: None,
@@ -145,7 +148,8 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
                 is_fetching: false,
                 resp_headers: None,
                 fetch_complete_time: Some(Instant::now()),
-                last_req_time
+                last_req_time: current_item.last_req_time,
+                request_params: current_item.request_params.clone()
             };
             uri_cache.insert(uri.to_string(), entry);
         },
@@ -310,21 +314,13 @@ async fn clear_cache(mut req: Request<Body>) -> Result<hyper::Response<Body>, In
   
 }
 
-struct RequestParams {
-    uri: String,
-    queryStr: String,
-    headerMap:HeaderMap,
-    method:Method,
-    body:String,
-    request_etag: Option<HeaderValue>
-}
-
 async fn background_refresh_cache(request_params:RequestParams, count:u32)
         -> Result<hyper::Response<Body>, Infallible> {
 
+    let c_req_params = request_params.clone();
     let RequestParams {uri, queryStr, headerMap, method, body, request_etag} = request_params;
+    update_cache(&StartFetching(uri.clone(), c_req_params)).await;
 
-    update_cache(&StartFetching(uri.clone())).await;
     let uri_path = uri.clone(); //fixme - clean this up? not necessary
 
     let sleep_statement = task::spawn(delay());
