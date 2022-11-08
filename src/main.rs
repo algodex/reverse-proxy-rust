@@ -267,6 +267,16 @@ async fn clear_cache(mut req: Request<Body>) -> Result<hyper::Response<Body>, In
     let clear_cache_url = &req.uri().path().to_string();
 
     let mut response_cache = APP_STATE.uri_cache.write().await;
+
+    let cache_item = response_cache.get(clear_cache_url);
+    if cache_item.is_some() && cache_item.unwrap().is_fetching {
+        // The cache is fetching, so no need to delete it - it will update soon
+        return Ok(Response::builder()
+            .status(StatusCode::OK)
+            .body(Body::from(format!("Skipped Clearing Cache for {clear_cache_url} since it is fetching")))
+            .unwrap());
+    }
+
     response_cache.remove(clear_cache_url);
     println!("Deleted {clear_cache_url} from cache");
 
