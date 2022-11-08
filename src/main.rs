@@ -105,7 +105,6 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
             let cache_item = uri_cache.get(uri);
             if cache_item.is_some() && cache_item.unwrap().is_fetching {
                 // The cache is fetching, so no need to delete it - it will update soon
-                return;
             } else {
                 uri_cache.remove(uri);
             }
@@ -114,6 +113,7 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
             println!("FinishFetchingWithSuccess: {uri}");
             let current_item = uri_cache.get(uri);
             let last_req_time = if current_item.is_some() {
+                println!("Unexpected condition for FinishFetchingWithSuccess! setting last req time to now");
                 current_item.unwrap().last_req_time
             } else {
                 Instant::now()
@@ -135,7 +135,7 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
             let last_req_time = if current_item.is_some() {
                 current_item.unwrap().last_req_time
             } else {
-                println!("Unexpected condition! setting last req time to now");
+                println!("Unexpected condition for FinishFetchingWithError! setting last req time to now");
                 Instant::now()
             };
 
@@ -208,7 +208,7 @@ async fn getCacheEntry(url: &Uri) -> Option<UriEntry> {
     return None;
 }
 
-fn build_response(body: &String, resp_headers: &HeaderMap, request_etag: &Option<&HeaderValue>) -> Response<Body> {
+fn build_response(body: &String, resp_headers: &HeaderMap, request_etag: &Option<HeaderValue>) -> Response<Body> {
     let status_code = match request_etag {
         None => StatusCode::OK,
         Some(req_etag) => {
@@ -311,7 +311,7 @@ async fn clear_cache(mut req: Request<Body>) -> Result<hyper::Response<Body>, In
 }
 
 async fn background_refresh_cache(uri: &String, queryStr: &String, headerMap:HeaderMap,
-    method:Method, body:String, request_etag: Option<&HeaderValue>, count:u32) 
+    method:Method, body:String, request_etag: Option<HeaderValue>, count:u32) 
         -> Result<hyper::Response<Body>, Infallible> {
     update_cache(&StartFetching(uri.clone())).await;
     let uri_path = uri.clone(); //fixme - clean this up? not necessary
@@ -388,6 +388,7 @@ async fn background_refresh_cache(uri: &String, queryStr: &String, headerMap:Hea
                             }
                         });
                     });
+
                     Ok(build_response(&proxy_text, &resp_headers, &request_etag))
                 }
                 Err(error) => {
@@ -424,7 +425,7 @@ async fn handle(
     let headerMap: HeaderMap = req.headers().clone();
     println!("HEADERS: {:?}", headerMap);
 
-    let request_etag = req.headers().get("if-none-match");
+    let request_etag = req.headers().get("if-none-match").cloned();
 
     if (headerMap.contains_key("clear-cache")) {
         return clear_cache(req).await;
