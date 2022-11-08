@@ -7,6 +7,7 @@
 #[macro_use]
 extern crate lazy_static;
 
+use async_recursion::async_recursion;
 use hyper::body;
 use hyper::body::Bytes;
 use hyper::http::HeaderValue;
@@ -18,6 +19,7 @@ use reqwest::RequestBuilder;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
+use std::pin::Pin;
 use std::thread::current;
 use std::time::Duration;
 use std::{convert::Infallible, net::SocketAddr};
@@ -57,7 +59,8 @@ struct UpdateCacheEntry {
 
 #[derive(Clone, Debug)]
 enum UriCacheUpdateMessage {
-    StartFetching(String, RequestParams),
+    StartFetchingFromClient(String, RequestParams),
+    StartFetchingFromRefresh(String),
     DeleteOrRefreshCache(String),
     FinishFetchingWithSuccess(String, UpdateCacheEntry),
     FinishFetchingWithError(String),
@@ -94,13 +97,14 @@ lazy_static! {
     };
 }
 
+#[async_recursion]
 async fn update_cache(msg: &UriCacheUpdateMessage) {
     // dbg!(msg);
     let mut uri_cache = APP_STATE.uri_cache.write().await;
 
     match msg {
-        StartFetching(uri, req_params) => {
-            println!("StartFetching: {uri}");
+        StartFetchingFromClient(uri, req_params) => {
+            println!("StartFetchingFromClient: {uri}");
             let entry = UriEntry {
                 response_body: None,
                 is_fetching: true,
@@ -111,13 +115,43 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
                 request_params: (*req_params).clone()
             };
             uri_cache.insert(uri.to_string(), entry);
+        },
+        StartFetchingFromRefresh(uri) => {
+            println!("StartFetchingFromRefresh: {uri}");
+            let current_item = uri_cache.get(uri)
+            .expect("Expected a cached item, but did not find one. Accidentally deleted? {uri}");
+
+            let entry = UriEntry {
+                response_body: None,
+                is_fetching: true,
+                response_success: None,
+                resp_headers: None,
+                fetch_complete_time: None,
+                last_req_time: current_item.last_req_time,
+                request_params: current_item.request_params.clone()
+            };
+            uri_cache.insert(uri.to_string(), entry);
         }
         DeleteOrRefreshCache(uri) => {
             println!("DeleteOrRefreshCache: {uri}");
             let cache_item = uri_cache.get(uri);
+
+            let env = ENV.read().await;
+            let cache_refresh_window = env.get("DEFAULT_REFRESH_WINDOW_SECS").unwrap().parse::<u64>().unwrap();
+
             if cache_item.is_some() && cache_item.unwrap().is_fetching {
                 // The cache is fetching, so no need to delete it - it will update soon
+            } else if (cache_item.is_some() &&
+                cache_item.unwrap().last_req_time.elapsed() <= Duration::from_secs(cache_refresh_window)) {
+                    let request_params = cache_item.unwrap().request_params.clone();
+                    let uri = uri.clone();
+                    task::spawn(async move {
+                        let req_count = incr_count().await;
+                        println!("Refreshing Cache: {uri}");
+                        background_refresh_cache(request_params.clone(), req_count, true).await;
+                    });
             } else {
+                println!("Deleting Cache (actually): {uri}");
                 uri_cache.remove(uri);
             }
         },
@@ -314,12 +348,17 @@ async fn clear_cache(mut req: Request<Body>) -> Result<hyper::Response<Body>, In
   
 }
 
-async fn background_refresh_cache(request_params:RequestParams, count:u32)
+async fn background_refresh_cache(request_params:RequestParams, count:u32, from_refresh:bool)
         -> Result<hyper::Response<Body>, Infallible> {
 
     let c_req_params = request_params.clone();
     let RequestParams {uri, queryStr, headerMap, method, body, request_etag} = request_params;
-    update_cache(&StartFetching(uri.clone(), c_req_params)).await;
+
+    if (from_refresh) {
+        update_cache(&StartFetchingFromRefresh(uri.clone())).await;
+    } else {
+        update_cache(&StartFetchingFromClient(uri.clone(), c_req_params)).await;
+    }
 
     let uri_path = uri.clone(); //fixme - clean this up? not necessary
 
@@ -483,7 +522,7 @@ async fn handle(
 
     return background_refresh_cache(RequestParams{
         uri: uri_path.clone(), queryStr, headerMap, method,
-        body, request_etag}, count).await;
+        body, request_etag}, count, false).await;
 }
 
 #[tokio::main]
