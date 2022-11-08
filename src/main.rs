@@ -310,9 +310,20 @@ async fn clear_cache(mut req: Request<Body>) -> Result<hyper::Response<Body>, In
   
 }
 
-async fn background_refresh_cache(uri: &String, queryStr: &String, headerMap:HeaderMap,
-    method:Method, body:String, request_etag: Option<HeaderValue>, count:u32) 
+struct RequestParams {
+    uri: String,
+    queryStr: String,
+    headerMap:HeaderMap,
+    method:Method,
+    body:String,
+    request_etag: Option<HeaderValue>
+}
+
+async fn background_refresh_cache(request_params:RequestParams, count:u32)
         -> Result<hyper::Response<Body>, Infallible> {
+
+    let RequestParams {uri, queryStr, headerMap, method, body, request_etag} = request_params;
+
     update_cache(&StartFetching(uri.clone())).await;
     let uri_path = uri.clone(); //fixme - clean this up? not necessary
 
@@ -474,8 +485,9 @@ async fn handle(
     }
     // Not currently in cache, so try to fetch and refresh cache
 
-    return background_refresh_cache(&uri_path, &queryStr, headerMap,
-            method, body, request_etag, count).await;
+    return background_refresh_cache(RequestParams{
+        uri: uri_path.clone(), queryStr, headerMap, method,
+        body, request_etag}, count).await;
 }
 
 #[tokio::main]
