@@ -38,7 +38,8 @@ struct UriEntry {
     resp_headers: Option<HeaderMap>,
     fetch_complete_time: Option<Instant>,
     last_req_time: Instant,
-    request_params: RequestParams
+    request_params: RequestParams,
+    clear_timer_creation_time: Option<Instant>
 }
 
 #[derive(Clone, Debug)]
@@ -61,7 +62,8 @@ struct UpdateCacheEntry {
 enum UriCacheUpdateMessage {
     StartFetchingFromClient(String, RequestParams),
     StartFetchingFromRefresh(String),
-    DeleteOrRefreshCache(String),
+    DeleteOrRefreshCache(String, Option<Instant>),
+    SetClearTimerStart(String, Instant),
     FinishFetchingWithSuccess(String, UpdateCacheEntry),
     FinishFetchingWithError(String),
     UpdateLatestReqTimestamp(String)
@@ -112,9 +114,16 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
                 resp_headers: None,
                 fetch_complete_time: None,
                 last_req_time: Instant::now(),
-                request_params: (*req_params).clone()
+                request_params: (*req_params).clone(),
+                clear_timer_creation_time: None
             };
             uri_cache.insert(uri.to_string(), entry);
+        },
+        SetClearTimerStart(uri, instant) => {
+            if (uri_cache.get(uri).is_some()) {
+                let current_item = uri_cache.get_mut(uri).unwrap();
+                current_item.clear_timer_creation_time = Some(*instant);
+            }
         },
         StartFetchingFromRefresh(uri) => {
             println!("StartFetchingFromRefresh: {uri}");
@@ -128,13 +137,19 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
                 resp_headers: None,
                 fetch_complete_time: None,
                 last_req_time: current_item.last_req_time,
-                request_params: current_item.request_params.clone()
+                request_params: current_item.request_params.clone(),
+                clear_timer_creation_time: None
             };
             uri_cache.insert(uri.to_string(), entry);
         }
-        DeleteOrRefreshCache(uri) => {
+        DeleteOrRefreshCache(uri, instant) => {
             println!("DeleteOrRefreshCache: {uri}");
             let cache_item = uri_cache.get(uri);
+
+            let timer_mismatch_detected = 
+                instant.is_some() &&
+                cache_item.unwrap().clear_timer_creation_time.is_some() &&
+                instant.unwrap() != cache_item.unwrap().clear_timer_creation_time.unwrap();
 
             let env = ENV.read().await;
             let cache_refresh_window = env.get("DEFAULT_REFRESH_WINDOW_SECS").unwrap().parse::<u64>().unwrap();
@@ -142,7 +157,8 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
             if cache_item.is_some() && cache_item.unwrap().is_fetching {
                 // The cache is fetching, so no need to delete it - it will update soon
             } else if (cache_item.is_some() &&
-                cache_item.unwrap().last_req_time.elapsed() <= Duration::from_secs(cache_refresh_window)) {
+                cache_item.unwrap().last_req_time.elapsed() <= Duration::from_secs(cache_refresh_window)
+                && !timer_mismatch_detected) {
                     let request_params = cache_item.unwrap().request_params.clone();
                     let uri = uri.clone();
                     task::spawn(async move {
@@ -150,7 +166,7 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
                         println!("Refreshing Cache: {uri}");
                         background_refresh_cache(request_params.clone(), req_count, true).await;
                     });
-            } else {
+            } else if (!timer_mismatch_detected) {
                 println!("Deleting Cache (actually): {uri}");
                 uri_cache.remove(uri);
             }
@@ -167,7 +183,8 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
                 resp_headers: update_cache_entry.resp_headers.clone(),
                 fetch_complete_time: Some(Instant::now()),
                 last_req_time: current_item.last_req_time,
-                request_params: current_item.request_params.clone()
+                request_params: current_item.request_params.clone(),
+                clear_timer_creation_time: None
             };
             uri_cache.insert(uri.to_string(), entry);
         },
@@ -183,7 +200,8 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
                 resp_headers: None,
                 fetch_complete_time: Some(Instant::now()),
                 last_req_time: current_item.last_req_time,
-                request_params: current_item.request_params.clone()
+                request_params: current_item.request_params.clone(),
+                clear_timer_creation_time: None
             };
             uri_cache.insert(uri.to_string(), entry);
         },
@@ -338,7 +356,7 @@ async fn clear_cache(mut req: Request<Body>) -> Result<hyper::Response<Body>, In
 
     let clear_cache_url = &req.uri().path().to_string();
 
-    update_cache(&DeleteOrRefreshCache(clear_cache_url.to_string())).await;
+    update_cache(&DeleteOrRefreshCache(clear_cache_url.to_string(), None)).await;
     println!("Deleted {clear_cache_url} from cache");
 
     Ok(Response::builder()
@@ -414,23 +432,24 @@ async fn background_refresh_cache(request_params:RequestParams, count:u32, from_
                     task::spawn(async move {
                         let uri_c = uri.clone();
                         println!("{count}: Updating cache!");
-                        {
-                            let update_entry = UpdateCacheEntry {
-                                resp_headers: Some(c_resp_headers),
-                                response_body: Some(c_body)
-                            };
-                            
-                            update_cache(&FinishFetchingWithSuccess(uri_c, update_entry)).await;
-                            println!("{count}: Inserted into cache!");
-                        }
+                        let update_entry = UpdateCacheEntry {
+                            resp_headers: Some(c_resp_headers),
+                            response_body: Some(c_body)
+                        };
+                        
+                        update_cache(&FinishFetchingWithSuccess(uri_c, update_entry)).await;
+                        println!("{count}: Inserted into cache!");
 
                         task::spawn(async move {
                             let env = ENV.read().await;
                             let cache_expiry_time = env.get("DEFAULT_CACHE_EXPIRY_TIME_SECS").unwrap().parse::<u64>().unwrap();
+                            let clear_timer_creation_time = Some(Instant::now());
+                            let uri_c = uri.clone();
+                            update_cache(&SetClearTimerStart(uri, clear_timer_creation_time.unwrap())).await;
                             sleep(Duration::from_secs(cache_expiry_time)).await;
                             {
-                                println!("Clearing old cache for: {uri}");
-                                update_cache(&DeleteOrRefreshCache(uri)).await;
+                                println!("Clearing old cache for: {uri_c}");
+                                update_cache(&DeleteOrRefreshCache(uri_c, clear_timer_creation_time)).await;
                             }
                         });
                     });
