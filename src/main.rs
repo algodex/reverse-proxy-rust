@@ -308,6 +308,7 @@ async fn handle(
                         },
                         Err(_) => {
                             set_is_fetching_uri(&uri_path, false).await;
+                            println!("Error getting body from {}", &uri_path);
                             return Ok(Response::builder()
                                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                                 .body(Body::from(format!("error response when getting body text from {uri_path}")))
