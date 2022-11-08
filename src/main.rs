@@ -260,11 +260,10 @@ async fn handle(
             let x = cached_resp.unwrap();
             return Ok(build_response(&x.body, &x.resp_headers, &request_etag));
         } else {
-            return Ok(build_response(
-                &"Timed out while getting response".to_string(),
-                &HeaderMap::new(),
-                &request_etag
-            ));
+            return Ok(Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::from("Timed out while waiting for read lock"))
+                .unwrap());
         }
     }
     // Not currently in cache, so try to fetch and refresh cache
