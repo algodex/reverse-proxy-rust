@@ -131,10 +131,10 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
             .expect("Expected a cached item, but did not find one. Accidentally deleted? {uri}");
 
             let entry = UriEntry {
-                response_body: None,
+                response_body: current_item.response_body.clone(),
                 is_fetching: true,
                 response_success: None,
-                resp_headers: None,
+                resp_headers: current_item.resp_headers.clone(),
                 fetch_complete_time: None,
                 last_req_time: current_item.last_req_time,
                 request_params: current_item.request_params.clone(),
@@ -147,9 +147,11 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
             let cache_item = uri_cache.get(uri);
 
             let timer_mismatch_detected = 
-                instant.is_some() &&
-                cache_item.unwrap().clear_timer_creation_time.is_some() &&
-                instant.unwrap() != cache_item.unwrap().clear_timer_creation_time.unwrap();
+                instant.is_some() && // We are here due to a timer
+                (  (cache_item.unwrap().clear_timer_creation_time.is_some() && // Timers mismatch
+                    instant.unwrap() != cache_item.unwrap().clear_timer_creation_time.unwrap())
+                || cache_item.unwrap().clear_timer_creation_time.is_none() // Or there was no timer set in cache item
+                );
 
             let env = ENV.read().await;
             let cache_refresh_window = env.get("DEFAULT_REFRESH_WINDOW_SECS").unwrap().parse::<u64>().unwrap();
@@ -226,17 +228,29 @@ async fn delay() {
     sleep(Duration::from_secs(timeout)).await;
 }
 
+async fn getCacheEntry(url: &Uri) -> Option<UriEntry> {
+    let response_cache = &APP_STATE.uri_cache.read().await;
+
+    if response_cache.contains_key(url) {
+        let cached_response = response_cache.get(url).unwrap();
+        return Some(cached_response.clone());
+    }
+    None
+}
+
 async fn getCachedResponseLoop(url: &Uri) -> Result<UriEntry, CachedResponseError> {
     loop {
         let response = getCacheEntry(url).await;
         match response {
             Some(val) => {
-                if (val.response_success.is_some()) {
+                if (val.response_body.is_some() && val.resp_headers.is_some()) {
                     return Ok(val);
                 } else if (val.is_fetching) {
                     // do nothing. loop will continue
                 } else if val.response_success.is_some() && val.response_success.unwrap() == false {
                     return Err(CachedResponseError{message: format!("Error during fetch: {url}")});
+                } else {
+                    return Err(CachedResponseError{message: format!("Error during fetch: {url} - Unknown condition")});
                 }
                 // else, continue the loop waiting
             }
@@ -252,16 +266,6 @@ async fn getCachedResponseOrTimeout(url: &Uri) -> Result<UriEntry, CachedRespons
         resp = cached_resp_fut => resp
     };
     res
-}
-
-async fn getCacheEntry(url: &Uri) -> Option<UriEntry> {
-    let response_cache = &APP_STATE.uri_cache.read().await;
-
-    if response_cache.contains_key(url) {
-        let cached_response = response_cache.get(url).unwrap();
-        return Some(cached_response.clone());
-    }
-    return None;
 }
 
 fn build_response(body: &String, resp_headers: &HeaderMap, request_etag: &Option<HeaderValue>) -> Response<Body> {
