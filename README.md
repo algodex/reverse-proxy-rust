@@ -19,10 +19,10 @@ This also features a Docker setup with nginx in front, which allows further conf
 
 `cp .env.example .env`
 
-### Build
+### Build and Run as Standalone
 
-`cargo build --release`
+`cargo run`
 
-## Build and Run In Docker
+## Build and Run with Nginx In Docker
 
 `./start.sh`
