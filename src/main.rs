@@ -147,11 +147,13 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
             let cache_item = uri_cache.get(uri);
 
             let timer_mismatch_detected = 
-                instant.is_some() && // We are here due to a timer
-                (  (cache_item.unwrap().clear_timer_creation_time.is_some() && // Timers mismatch
-                    instant.unwrap() != cache_item.unwrap().clear_timer_creation_time.unwrap())
+            instant.is_some() &&  // We are here due to a timer
+              (cache_item.is_none() || // cache item does not exist - makes no sense to have a timer to delete here
+                (  (cache_item.unwrap().clear_timer_creation_time.is_some() && // Timer id was cached
+                    instant.unwrap() != cache_item.unwrap().clear_timer_creation_time.unwrap()) // Timers mismatch
                 || cache_item.unwrap().clear_timer_creation_time.is_none() // Or there was no timer set in cache item
-                );
+                )
+              );
 
             let env = ENV.read().await;
             let cache_refresh_window = env.get("DEFAULT_REFRESH_WINDOW_SECS").unwrap().parse::<u64>().unwrap();
