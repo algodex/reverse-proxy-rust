@@ -30,6 +30,15 @@ use tokio::time::Instant;
 type Uri = String;
 use crate::UriCacheUpdateMessage::*;
 
+
+macro_rules! debug_dbg {
+    ($($arg:tt)*) => (if ::std::cfg!(debug_assertions) { ::std::dbg!($($arg)*); })
+}
+
+macro_rules! debug_println {
+    ($($arg:tt)*) => (if ::std::cfg!(debug_assertions) { ::std::println!($($arg)*); })
+}
+
 #[derive(Clone, Debug)]
 struct UriEntry {
     response_body: Option<String>,
@@ -101,12 +110,12 @@ lazy_static! {
 
 #[async_recursion]
 async fn update_cache(msg: &UriCacheUpdateMessage) {
-    // dbg!(msg);
+    // debug_dbg!(msg);
     let mut uri_cache = APP_STATE.uri_cache.write().await;
 
     match msg {
         StartFetchingFromClient(uri, req_params) => {
-            println!("StartFetchingFromClient: {uri}");
+            debug_println!("StartFetchingFromClient: {uri}");
             let entry = UriEntry {
                 response_body: None,
                 is_fetching: true,
@@ -126,7 +135,7 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
             }
         },
         StartFetchingFromRefresh(uri) => {
-            println!("StartFetchingFromRefresh: {uri}");
+            debug_println!("StartFetchingFromRefresh: {uri}");
             let current_item = uri_cache.get(uri)
             .expect("Expected a cached item, but did not find one. Accidentally deleted? {uri}");
 
@@ -143,7 +152,7 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
             uri_cache.insert(uri.to_string(), entry);
         }
         DeleteOrRefreshCache(uri, instant) => {
-            println!("DeleteOrRefreshCache: {uri}");
+            debug_println!("DeleteOrRefreshCache: {uri}");
             let cache_item = uri_cache.get(uri);
 
             let timer_mismatch_detected = 
@@ -167,16 +176,16 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
                     let uri = uri.clone();
                     task::spawn(async move {
                         let req_count = incr_count().await;
-                        println!("Refreshing Cache: {uri}");
+                        debug_println!("Refreshing Cache: {uri}");
                         background_refresh_cache(request_params.clone(), req_count, true).await;
                     });
             } else if (!timer_mismatch_detected) {
-                println!("Deleting Cache (actually): {uri}");
+                debug_println!("Deleting Cache (actually): {uri}");
                 uri_cache.remove(uri);
             }
         },
         FinishFetchingWithSuccess(uri, update_cache_entry) => {
-            println!("FinishFetchingWithSuccess: {uri}");
+            debug_println!("FinishFetchingWithSuccess: {uri}");
             let current_item = uri_cache.get(uri)
                 .expect("Expected a cached item, but did not find one. Accidentally deleted? {uri}");
 
@@ -193,7 +202,7 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
             uri_cache.insert(uri.to_string(), entry);
         },
         FinishFetchingWithError(uri) => {
-            println!("FinishFetchingWithError: {uri}");
+            debug_println!("FinishFetchingWithError: {uri}");
             let current_item = uri_cache.get(uri)
                 .expect("Expected a cached item, but did not find one. Accidentally deleted? {uri}");
 
@@ -210,7 +219,7 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
             uri_cache.insert(uri.to_string(), entry);
         },
         UpdateLatestReqTimestamp(uri) => {
-            println!("UpdateLatestReqTimestamp: {uri}");
+            debug_println!("UpdateLatestReqTimestamp: {uri}");
             let current_item = uri_cache.get_mut(uri);
             if current_item.is_some() {
                 current_item.unwrap().last_req_time = Instant::now();
@@ -363,7 +372,7 @@ async fn clear_cache(mut req: Request<Body>) -> Result<hyper::Response<Body>, In
     let clear_cache_url = &req.uri().path().to_string();
 
     update_cache(&DeleteOrRefreshCache(clear_cache_url.to_string(), None)).await;
-    println!("Deleted {clear_cache_url} from cache");
+    debug_println!("Deleted {clear_cache_url} from cache");
 
     Ok(Response::builder()
         .status(StatusCode::OK)
@@ -395,7 +404,7 @@ async fn background_refresh_cache(request_params:RequestParams, count:u32, from_
 
     //http://host.docker.internal:5984{uri_path}{queryStr}"
     let fullURL = format!("{upstream_url}{uri_path}{queryStr}");
-    println!("full URL: {fullURL}");
+    debug_println!("full URL: {fullURL}");
 
     let mut header_map_temp = headerMap.clone();
     header_map_temp.remove("if-none-match"); // We want upstream URLs to fetch full response
@@ -403,7 +412,7 @@ async fn background_refresh_cache(request_params:RequestParams, count:u32, from_
 
     let res = tokio::select! {
         _ = sleep_statement => {
-            println!("timed out while doing background fetch {uri_path}");
+            debug_println!("timed out while doing background fetch {uri_path}");
             update_cache(&FinishFetchingWithError(uri_path.clone())).await;
             {Ok(Response::builder()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -414,16 +423,16 @@ async fn background_refresh_cache(request_params:RequestParams, count:u32, from_
         response = proxy_call => {
             match response {
                 Ok(response) => {
-                    dbg!(&response);
+                    debug_dbg!(&response);
                     let resp_headers = response.headers().clone();
                     let proxy_text = match response.text().await {
                         Ok(p) => {
-                            // println!("FULL RESPONSE:{}", p);
+                            // debug_println!("FULL RESPONSE:{}", p);
                             p
                         },
                         Err(_) => {
                             update_cache(&FinishFetchingWithError(uri_path.clone())).await;
-                            println!("Error getting body from {}", &uri_path);
+                            debug_println!("Error getting body from {}", &uri_path);
                             return Ok(Response::builder()
                                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                                 .body(Body::from(format!("error response when getting body text from {uri_path}")))
@@ -437,14 +446,14 @@ async fn background_refresh_cache(request_params:RequestParams, count:u32, from_
                     // Not sure if this should be in its own task
                     task::spawn(async move {
                         let uri_c = uri.clone();
-                        println!("{count}: Updating cache!");
+                        debug_println!("{count}: Updating cache!");
                         let update_entry = UpdateCacheEntry {
                             resp_headers: Some(c_resp_headers),
                             response_body: Some(c_body)
                         };
                         
                         update_cache(&FinishFetchingWithSuccess(uri_c, update_entry)).await;
-                        println!("{count}: Inserted into cache!");
+                        debug_println!("{count}: Inserted into cache!");
 
                         task::spawn(async move {
                             let env = ENV.read().await;
@@ -454,7 +463,7 @@ async fn background_refresh_cache(request_params:RequestParams, count:u32, from_
                             update_cache(&SetClearTimerStart(uri, clear_timer_creation_time.unwrap())).await;
                             sleep(Duration::from_secs(cache_expiry_time)).await;
                             {
-                                println!("Clearing old cache for: {uri_c}");
+                                debug_println!("Clearing old cache for: {uri_c}");
                                 update_cache(&DeleteOrRefreshCache(uri_c, clear_timer_creation_time)).await;
                             }
                         });
@@ -463,7 +472,7 @@ async fn background_refresh_cache(request_params:RequestParams, count:u32, from_
                     Ok(build_response(&proxy_text, &resp_headers, &request_etag))
                 }
                 Err(error) => {
-                    println!("error in response from background fetch {uri_path} {error:?}");
+                    debug_println!("error in response from background fetch {uri_path} {error:?}");
                     update_cache(&FinishFetchingWithError(uri_path.clone())).await;
                     Ok(Response::builder()
                                 .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -480,11 +489,11 @@ async fn handle(
     _client_ip: IpAddr,
     mut req: Request<Body>,
 ) -> Result<hyper::Response<Body>, Infallible> {
-    println!("in handle");
+    debug_println!("in handle");
 
     let method = req.method().clone();
     let count = incr_count().await;
-    println!("{count} requests");
+    debug_println!("{count} requests");
     let body = read_json_body(&mut req).await;
     let pathAndQuery = req.uri().path_and_query();
 
@@ -494,21 +503,21 @@ async fn handle(
     let path = pathAndQuery.unwrap().path();
 
     let headerMap: HeaderMap = req.headers().clone();
-    println!("HEADERS: {:?}", headerMap);
+    debug_println!("HEADERS: {:?}", headerMap);
 
     let request_etag = req.headers().get("if-none-match").cloned();
 
     if (headerMap.contains_key("clear-cache")) {
         return clear_cache(req).await;
     }
-    println!("PATH: {path}");
-    println!("BODY: {body:?}");
+    debug_println!("PATH: {path}");
+    debug_println!("BODY: {body:?}");
     let queryStr = match query {
         Some(q) => format!("?{q}"),
         None => "".to_string(),
     };
     if let Some(q) = query {
-        println!("QUERY: {q}");
+        debug_println!("QUERY: {q}");
     }
     let uri_path = &req.uri().path().to_string();
     let cached_resp = getCacheEntry(uri_path).await;
@@ -520,19 +529,19 @@ async fn handle(
         });
 
         if uri_entry.response_body.is_some() {
-            println!("{count} Returning from cache!");
+            debug_println!("{count} Returning from cache!");
             return Ok(build_response(&uri_entry.response_body.unwrap(),
                 &uri_entry.resp_headers.unwrap(), &request_etag));
         }
     }
 
-    println!("{count}: no cache found... {uri_path}");
+    debug_println!("{count}: no cache found... {uri_path}");
     let is_fetching = is_fetching_uri(uri_path).await;
 
     if is_fetching {
-        println!("{count}: could not get write lock. waiting for read lock");
+        debug_println!("{count}: could not get write lock. waiting for read lock");
         let cached_resp = getCachedResponseOrTimeout(uri_path).await;
-        println!("{count}: got read lock");
+        debug_println!("{count}: got read lock");
         if cached_resp.is_ok() {
             let x = cached_resp.unwrap();
             return Ok(build_response(&x.response_body.unwrap(), &x.resp_headers.unwrap(), &request_etag));
@@ -574,6 +583,6 @@ async fn main() {
     println!("Running server on {:?}", addr);
 
     if let Err(e) = server.await {
-        eprintln!("server error: {}", e);
+        println!("server error: {}", e);
     }
 }
