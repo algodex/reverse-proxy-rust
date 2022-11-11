@@ -251,22 +251,25 @@ async fn getCacheEntry(url: &Uri) -> Option<UriEntry> {
 
 async fn getCachedResponseLoop(url: &Uri) -> Result<UriEntry, CachedResponseError> {
     loop {
-        let response = getCacheEntry(url).await;
-        match response {
-            Some(val) => {
-                if (val.response_body.is_some() && val.resp_headers.is_some()) {
-                    return Ok(val);
-                } else if (val.is_fetching) {
-                    // do nothing. loop will continue
-                } else if val.response_success.is_some() && val.response_success.unwrap() == false {
-                    return Err(CachedResponseError{message: format!("Error during fetch: {url}")});
-                } else {
-                    return Err(CachedResponseError{message: format!("Error during fetch: {url} - Unknown condition")});
+        {
+            let response = getCacheEntry(url).await;
+            match response {
+                Some(val) => {
+                    if (val.response_body.is_some() && val.resp_headers.is_some()) {
+                        return Ok(val);
+                    } else if (val.is_fetching) {
+                        // do nothing. loop will continue
+                    } else if val.response_success.is_some() && val.response_success.unwrap() == false {
+                        return Err(CachedResponseError{message: format!("Error during fetch: {url}")});
+                    } else {
+                        return Err(CachedResponseError{message: format!("Error during fetch: {url} - Unknown condition")});
+                    }
+                    // else, continue the loop waiting
                 }
-                // else, continue the loop waiting
+                None => return Err(CachedResponseError{message: format!("No cache entry found for uri: {url}")}),
             }
-            None => return Err(CachedResponseError{message: format!("No cache entry found for uri: {url}")}),
         }
+        debug_println!("looping");
         //FIXME - change this to use a message channel instead of loop with polling
         sleep(Duration::from_millis(100)).await; 
     }
