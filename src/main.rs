@@ -267,6 +267,7 @@ async fn getCachedResponseLoop(url: &Uri) -> Result<UriEntry, CachedResponseErro
             }
             None => return Err(CachedResponseError{message: format!("No cache entry found for uri: {url}")}),
         }
+        sleep(Duration::from_millis(100)).await;
     }
 }
 async fn getCachedResponseOrTimeout(url: &Uri) -> Result<UriEntry, CachedResponseError> {
