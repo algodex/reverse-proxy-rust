@@ -399,7 +399,7 @@ async fn background_refresh_cache(
     let c_req_params = request_params.clone();
     let RequestParams {
         uri,
-        query_str: queryStr,
+        query_str,
         header_map,
         method,
         body,
