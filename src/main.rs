@@ -422,7 +422,7 @@ async fn background_refresh_cache(
     let upstream_url = env.get("UPSTREAM_URL").unwrap();
 
     //http://host.docker.internal:5984{uri_path}{queryStr}"
-    let full_url = format!("{upstream_url}{uri_path}{queryStr}");
+    let full_url = format!("{upstream_url}{uri_path}{query_str}");
     debug_println!("full URL: {full_url}");
 
     let mut header_map_temp = header_map.clone();
