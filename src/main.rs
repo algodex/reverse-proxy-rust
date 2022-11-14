@@ -400,7 +400,7 @@ async fn background_refresh_cache(
     let RequestParams {
         uri,
         query_str: queryStr,
-        header_map: headerMap,
+        header_map,
         method,
         body,
         request_etag,
@@ -425,7 +425,7 @@ async fn background_refresh_cache(
     let full_url = format!("{upstream_url}{uri_path}{queryStr}");
     debug_println!("full URL: {full_url}");
 
-    let mut header_map_temp = headerMap.clone();
+    let mut header_map_temp = header_map.clone();
     header_map_temp.remove("if-none-match"); // We want upstream URLs to fetch full response
     let proxy_call = get_req(method, client, full_url, body, header_map_temp).send();
 
