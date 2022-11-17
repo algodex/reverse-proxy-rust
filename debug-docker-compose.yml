@@ -12,7 +12,9 @@ services:
   reverse-proxy:
     volumes:
       - ./.env:/.env
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.debug
     ports:
       - "8000:8000"
     entrypoint: "./target/debug/reverse_proxy_test"
