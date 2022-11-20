@@ -314,12 +314,10 @@ fn build_response(
         builder = builder.header(header_key, resp_headers.get(header_key).unwrap());
     }
 
-    let body = match status_code.as_u16() {
-        304 => String::from(""),
-        _ => String::from(body),
-    };
-
-    builder.body(Body::from(body)).unwrap()
+    match status_code.as_u16() {
+        304 => builder.body(Body::from("")).unwrap(),
+        _ => builder.body(Body::from(body.clone())).unwrap(),
+    }
 }
 
 async fn incr_count() -> u32 {
