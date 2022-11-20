@@ -351,13 +351,14 @@ fn get_req(
     full_url: String,
     body: String,
     header_map: HeaderMap,
+    timeout: Duration
 ) -> RequestBuilder {
     match method {
-        Method::POST => client.post(full_url).body(body).headers(header_map),
-        Method::GET => client.get(full_url).body(body).headers(header_map),
+        Method::POST => client.post(full_url).body(body).headers(header_map).timeout(timeout),
+        Method::GET => client.get(full_url).body(body).headers(header_map).timeout(timeout),
         _ => {
             //FIXME - add other types? Or return error?
-            client.get(full_url).body(body).headers(header_map)
+            client.get(full_url).body(body).headers(header_map).timeout(timeout)
         }
     }
 }
@@ -414,8 +415,6 @@ async fn background_refresh_cache(
 
     let uri_path = uri.clone(); //fixme - clean this up? not necessary
 
-    let sleep_statement = task::spawn(delay());
-
     let client = reqwest::Client::new();
 
     let env = ENV.read().await;
@@ -427,81 +426,74 @@ async fn background_refresh_cache(
 
     let mut header_map_temp = header_map.clone();
     header_map_temp.remove("if-none-match"); // We want upstream URLs to fetch full response
-    let proxy_call = get_req(method, client, full_url, body, header_map_temp).send();
 
-    let res = tokio::select! {
-        _ = sleep_statement => {
-            debug_println!("timed out while doing background fetch {uri_path}");
-            update_cache(&FinishFetchingWithError(uri_path.clone())).await;
-            {Ok(Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Body::from("timed out"))
-                .unwrap())}
-        },
+    let env = ENV.read().await;
+    let timeout = env.get("REQ_TIMEOUT").unwrap().parse::<u64>().unwrap();
 
-        response = proxy_call => {
-            match response {
-                Ok(response) => {
-                    debug_dbg!(&response);
-                    let resp_headers = response.headers().clone();
-                    let proxy_text = match response.text().await {
-                        Ok(p) => {
-                            // debug_println!("FULL RESPONSE:{}", p);
-                            p
-                        },
-                        Err(_) => {
-                            update_cache(&FinishFetchingWithError(uri_path.clone())).await;
-                            debug_println!("Error getting body from {}", &uri_path);
-                            return Ok(Response::builder()
-                                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                .body(Body::from(format!("error response when getting body text from {uri_path}")))
-                                .unwrap())
-                        },
-                    };
-                    // Update Cache
-                    let uri = uri_path.clone();
-                    let c_body = proxy_text.clone();
-                    let c_resp_headers = resp_headers.clone();
-                    // Not sure if this should be in its own task
-                    task::spawn(async move {
-                        let uri_c = uri.clone();
-                        debug_println!("{count}: Updating cache!");
-                        let update_entry = UpdateCacheEntry {
-                            resp_headers: Some(c_resp_headers),
-                            response_body: Some(c_body)
-                        };
+    let proxy_call = get_req(method, client, full_url, body, header_map_temp,
+        Duration::from_secs(timeout)).send();
 
-                        update_cache(&FinishFetchingWithSuccess(uri_c, update_entry)).await;
-                        debug_println!("{count}: Inserted into cache!");
-
-                        task::spawn(async move {
-                            let env = ENV.read().await;
-                            let cache_expiry_time = env.get("DEFAULT_CACHE_EXPIRY_TIME_SECS").unwrap().parse::<u64>().unwrap();
-                            let clear_timer_creation_time = Some(Instant::now());
-                            let uri_c = uri.clone();
-                            update_cache(&SetClearTimerStart(uri, clear_timer_creation_time.unwrap())).await;
-                            sleep(Duration::from_secs(cache_expiry_time)).await;
-                            {
-                                debug_println!("Clearing old cache for: {uri_c}");
-                                update_cache(&DeleteOrRefreshCache(uri_c, clear_timer_creation_time)).await;
-                            }
-                        });
-                    });
-
-                    Ok(build_response(&proxy_text, &resp_headers, &request_etag))
-                }
-                Err(error) => {
-                    debug_println!("error in response from background fetch {uri_path} {error:?}");
+    let response = proxy_call.await;
+    
+    return match response {
+        Ok(response) => {
+            debug_dbg!(&response);
+            let resp_headers = response.headers().clone();
+            let proxy_text = match response.text().await {
+                Ok(p) => {
+                    // debug_println!("FULL RESPONSE:{}", p);
+                    p
+                },
+                Err(_) => {
                     update_cache(&FinishFetchingWithError(uri_path.clone())).await;
-                    Ok(Response::builder()
-                                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                .body(Body::from("error response"))
-                                .unwrap())}
-                }
-            }
-    };
+                    debug_println!("Error getting body from {}", &uri_path);
+                    return Ok(Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from(format!("error response when getting body text from {uri_path}")))
+                        .unwrap())
+                },
+            };
+            // Update Cache
+            let uri = uri_path.clone();
+            let c_body = proxy_text.clone();
+            let c_resp_headers = resp_headers.clone();
+            // Not sure if this should be in its own task
+            task::spawn(async move {
+                let uri_c = uri.clone();
+                debug_println!("{count}: Updating cache!");
+                let update_entry = UpdateCacheEntry {
+                    resp_headers: Some(c_resp_headers),
+                    response_body: Some(c_body)
+                };
 
-    return res;
+                update_cache(&FinishFetchingWithSuccess(uri_c, update_entry)).await;
+                debug_println!("{count}: Inserted into cache!");
+
+                task::spawn(async move {
+                    let env = ENV.read().await;
+                    let cache_expiry_time = env.get("DEFAULT_CACHE_EXPIRY_TIME_SECS").unwrap().parse::<u64>().unwrap();
+                    let clear_timer_creation_time = Some(Instant::now());
+                    let uri_c = uri.clone();
+                    update_cache(&SetClearTimerStart(uri, clear_timer_creation_time.unwrap())).await;
+                    sleep(Duration::from_secs(cache_expiry_time)).await;
+                    {
+                        debug_println!("Clearing old cache for: {uri_c}");
+                        update_cache(&DeleteOrRefreshCache(uri_c, clear_timer_creation_time)).await;
+                    }
+                });
+            });
+
+            Ok(build_response(&proxy_text, &resp_headers, &request_etag))
+        }
+        Err(error) => {
+            let error_resp = format!("error in response from background fetch {uri_path} {error:?}");
+            debug_println!("{error_resp}");
+            update_cache(&FinishFetchingWithError(uri_path.clone())).await;
+            Ok(Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from(error_resp))
+                        .unwrap())}
+        };
 }
 
 async fn handle(
