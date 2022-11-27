@@ -7,15 +7,15 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Debug executable 'reverse_proxy_test'",
+      "name": "Debug executable 'reverse_proxy'",
       "cargo": {
         "args": [
           "build",
-          "--bin=reverse_proxy_test",
-          "--package=reverse_proxy_test"
+          "--bin=reverse_proxy",
+          "--package=reverse_proxy"
         ],
         "filter": {
-          "name": "reverse_proxy_test",
+          "name": "reverse_proxy",
           "kind": "bin"
         }
       },
@@ -25,16 +25,16 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Debug unit tests in executable 'reverse_proxy_test'",
+      "name": "Debug unit tests in executable 'reverse_proxy'",
       "cargo": {
         "args": [
           "test",
           "--no-run",
-          "--bin=reverse_proxy_test",
-          "--package=reverse_proxy_test"
+          "--bin=reverse_proxy",
+          "--package=reverse_proxy"
         ],
         "filter": {
-          "name": "reverse_proxy_test",
+          "name": "reverse_proxy",
           "kind": "bin"
         }
       },

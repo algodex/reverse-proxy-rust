@@ -342,7 +342,6 @@ pub async fn read_json_body(req: &mut Request<Body>) -> String {
     String::from_utf8(Vec::from(&*bytes)).unwrap()
 }
 
-// Box<dyn core::future::Future<Output = Result<reqwest::Response, reqwest::Error>>>
 fn get_req(
     method: Method,
     client: reqwest::Client,
@@ -551,9 +550,9 @@ async fn handle(
     let is_fetching = is_fetching_uri(uri_path).await;
 
     if is_fetching {
-        debug_println!("{count}: could not get write lock. waiting for read lock");
+        debug_println!("{count}: other task is fetching. waiting for response in polling loop");
         let cached_resp = get_cached_response_or_timeout(uri_path).await;
-        debug_println!("{count}: got read lock");
+        debug_println!("{count}: got response");
         if cached_resp.is_ok() {
             let x = cached_resp.unwrap();
             return Ok(build_response(
