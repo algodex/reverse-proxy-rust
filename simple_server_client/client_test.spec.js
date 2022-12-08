@@ -5,10 +5,7 @@
 DEFAULT_CACHE_EXPIRY_TIME_SECS=6 # Default cache expiry time
 DEFAULT_REFRESH_WINDOW_SECS=12
 REQ_TIMEOUT=5 # Number of seconds to wait for an upstream request to time out
-# UPSTREAM_URL=http://host.docker.internal:3006
-#UPSTREAM_URL=http://localhost:3006
 UPSTREAM_URL=http://localhost:6000
-#UPSTREAM_URL=https://www.google.com
 
 CLEAR_CACHE_KEY=Secret # Set a secret for allow clearing the cache. clear-cache in header
 */

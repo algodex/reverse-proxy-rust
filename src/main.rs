@@ -184,8 +184,14 @@ async fn update_cache(msg: &UriCacheUpdateMessage) -> bool {
             let cache_refresh_window =
                 env.get("DEFAULT_REFRESH_WINDOW_SECS").unwrap().parse::<u64>().unwrap();
 
-            if cache_item.is_some() && cache_item.unwrap().is_fetching {
-                // The cache is fetching, so no need to delete it - it will update soon
+            let req_timeout = env.get("REQ_TIMEOUT").unwrap().parse::<u64>().unwrap();
+
+            // Check if the uri is fetching but it is over the timeout
+            let in_prog_timeout = cache_item.is_some() &&
+                cache_item.unwrap().last_upstream_req_time.elapsed() >= Duration::from_secs(req_timeout);
+
+            if cache_item.is_some() && cache_item.unwrap().is_fetching && !in_prog_timeout {
+                // The uri is fetching, so no need to delete it - it will update soon
             } else if cache_item.is_some()
                 && cache_item.unwrap().last_req_time.elapsed()
                     <= Duration::from_secs(cache_refresh_window)
