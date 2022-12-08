@@ -224,9 +224,11 @@ async fn update_cache(msg: &UriCacheUpdateMessage) -> bool {
         }
         FinishFetchingWithSuccess(uri, update_cache_entry) => {
             debug_println!("FinishFetchingWithSuccess: {uri}");
-            let current_item = uri_cache.get(uri).expect(
-                "Expected a cached item, but did not find one. Accidentally deleted? {uri}",
-            );
+
+            if (uri_cache.get(uri).is_none()) {
+                return false;
+            }
+            let current_item = uri_cache.get(uri).unwrap();
 
             let entry = UriEntry {
                 response_body: update_cache_entry.response_body.clone(),
@@ -242,9 +244,12 @@ async fn update_cache(msg: &UriCacheUpdateMessage) -> bool {
         }
         FinishFetchingWithError(uri) => {
             debug_println!("FinishFetchingWithError: {uri}");
-            let current_item = uri_cache.get(uri).expect(
-                "Expected a cached item, but did not find one. Accidentally deleted? {uri}",
-            );
+
+            if (uri_cache.get(uri).is_none()) {
+                return false;
+            }
+
+            let current_item = uri_cache.get(uri).unwrap();
 
             let entry = UriEntry {
                 response_body: None,
