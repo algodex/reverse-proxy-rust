@@ -115,8 +115,13 @@ async fn update_cache(msg: &UriCacheUpdateMessage) -> bool {
                 debug_println!("Already an entry that is fetching. Checking timeout");
                 let env = ENV.read().await;
                 let timeout = env.get("REQ_TIMEOUT").unwrap().parse::<u64>().unwrap();
-                if current_item.unwrap().last_upstream_req_time.elapsed() < Duration::from_secs(timeout) {
-                    debug_println!("Timeout is only {}", current_item.unwrap().last_upstream_req_time.elapsed().as_secs());
+                if current_item.unwrap().last_upstream_req_time.elapsed()
+                    < Duration::from_secs(timeout)
+                {
+                    debug_println!(
+                        "Timeout is only {}",
+                        current_item.unwrap().last_upstream_req_time.elapsed().as_secs()
+                    );
                     return false;
                 }
                 debug_println!("Going to refetch!");
@@ -148,7 +153,7 @@ async fn update_cache(msg: &UriCacheUpdateMessage) -> bool {
             }
             let current_item = current_item.unwrap();
 
-            if (current_item.is_fetching) {
+            if current_item.is_fetching {
                 let env = ENV.read().await;
                 let timeout = env.get("REQ_TIMEOUT").unwrap().parse::<u64>().unwrap();
                 if current_item.last_upstream_req_time.elapsed() < Duration::from_secs(timeout) {
@@ -187,8 +192,9 @@ async fn update_cache(msg: &UriCacheUpdateMessage) -> bool {
             let req_timeout = env.get("REQ_TIMEOUT").unwrap().parse::<u64>().unwrap();
 
             // Check if the uri is fetching but it is over the timeout
-            let in_prog_timeout = cache_item.is_some() &&
-                cache_item.unwrap().last_upstream_req_time.elapsed() >= Duration::from_secs(req_timeout);
+            let in_prog_timeout = cache_item.is_some()
+                && cache_item.unwrap().last_upstream_req_time.elapsed()
+                    >= Duration::from_secs(req_timeout);
 
             if cache_item.is_some() && cache_item.unwrap().is_fetching && !in_prog_timeout {
                 // The uri is fetching, so no need to delete it - it will update soon
@@ -363,9 +369,7 @@ async fn incr_count() -> u32 {
     *w
 }
 
-async fn check_or_start_fetching_uri(uri: &String,
-        c_req_params: RequestParams) -> bool {
-
+async fn check_or_start_fetching_uri(uri: &String, c_req_params: RequestParams) -> bool {
     // Returns true if not fetching
     update_cache(&StartFetchingFromClient(uri.clone(), c_req_params)).await
 }
@@ -382,7 +386,7 @@ fn get_req(
     full_url: String,
     body: String,
     header_map: HeaderMap,
-    timeout: Duration
+    timeout: Duration,
 ) -> RequestBuilder {
     match method {
         Method::POST => client.post(full_url).body(body).headers(header_map).timeout(timeout),
@@ -427,14 +431,7 @@ async fn background_refresh_cache(
     request_params: RequestParams,
     count: u32,
 ) -> Result<hyper::Response<Body>, Infallible> {
-    let RequestParams {
-        uri,
-        query_str,
-        header_map,
-        method,
-        body,
-        request_etag,
-    } = request_params;
+    let RequestParams { uri, query_str, header_map, method, body, request_etag } = request_params;
 
     let uri_path = uri.clone(); //fixme - clean this up? not necessary
 
@@ -453,11 +450,12 @@ async fn background_refresh_cache(
     let env = ENV.read().await;
     let timeout = env.get("REQ_TIMEOUT").unwrap().parse::<u64>().unwrap();
 
-    let proxy_call = get_req(method, client, full_url, body, header_map_temp,
-        Duration::from_secs(timeout)).send();
+    let proxy_call =
+        get_req(method, client, full_url, body, header_map_temp, Duration::from_secs(timeout))
+            .send();
 
     let response = proxy_call.await;
-    
+
     return match response {
         Ok(response) => {
             debug_dbg!(&response);
@@ -466,15 +464,17 @@ async fn background_refresh_cache(
                 Ok(p) => {
                     // debug_println!("FULL RESPONSE:{}", p);
                     p
-                },
+                }
                 Err(_) => {
                     update_cache(&FinishFetchingWithError(uri_path.clone())).await;
                     debug_println!("Error getting body from {}", &uri_path);
                     return Ok(Response::builder()
                         .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .body(Body::from(format!("error response when getting body text from {uri_path}")))
-                        .unwrap())
-                },
+                        .body(Body::from(format!(
+                            "error response when getting body text from {uri_path}"
+                        )))
+                        .unwrap());
+                }
             };
             // Update Cache
             let uri = uri_path.clone();
@@ -486,7 +486,7 @@ async fn background_refresh_cache(
                 debug_println!("{count}: Updating cache!");
                 let update_entry = UpdateCacheEntry {
                     resp_headers: Some(c_resp_headers),
-                    response_body: Some(c_body)
+                    response_body: Some(c_body),
                 };
 
                 update_cache(&FinishFetchingWithSuccess(uri_c, update_entry)).await;
@@ -494,10 +494,12 @@ async fn background_refresh_cache(
 
                 task::spawn(async move {
                     let env = ENV.read().await;
-                    let cache_expiry_time = env.get("DEFAULT_CACHE_EXPIRY_TIME_SECS").unwrap().parse::<u64>().unwrap();
+                    let cache_expiry_time =
+                        env.get("DEFAULT_CACHE_EXPIRY_TIME_SECS").unwrap().parse::<u64>().unwrap();
                     let clear_timer_creation_time = Some(Instant::now());
                     let uri_c = uri.clone();
-                    update_cache(&SetClearTimerStart(uri, clear_timer_creation_time.unwrap())).await;
+                    update_cache(&SetClearTimerStart(uri, clear_timer_creation_time.unwrap()))
+                        .await;
                     sleep(Duration::from_secs(cache_expiry_time)).await;
                     {
                         debug_println!("Clearing old cache for: {uri_c}");
@@ -509,14 +511,16 @@ async fn background_refresh_cache(
             Ok(build_response(&proxy_text, &resp_headers, &request_etag))
         }
         Err(error) => {
-            let error_resp = format!("error in response from background fetch {uri_path} {error:?}");
+            let error_resp =
+                format!("error in response from background fetch {uri_path} {error:?}");
             debug_println!("{error_resp}");
             update_cache(&FinishFetchingWithError(uri_path.clone())).await;
             Ok(Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .body(Body::from(error_resp))
-                        .unwrap())}
-        };
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::from(error_resp))
+                .unwrap())
+        }
+    };
 }
 
 async fn handle(
@@ -573,8 +577,14 @@ async fn handle(
     }
 
     debug_println!("{count}: no cache found... {uri_path}");
-    let req_params = RequestParams { uri: uri_path.clone(), query_str, header_map,
-            method, body, request_etag: request_etag.clone() };
+    let req_params = RequestParams {
+        uri: uri_path.clone(),
+        query_str,
+        header_map,
+        method,
+        body,
+        request_etag: request_etag.clone(),
+    };
 
     let is_fetching = !check_or_start_fetching_uri(uri_path, req_params.clone()).await;
 
@@ -598,11 +608,7 @@ async fn handle(
     }
     // Not currently in cache, so try to fetch and refresh cache
 
-    return background_refresh_cache(
-        req_params,
-        count,
-    )
-    .await;
+    return background_refresh_cache(req_params, count).await;
 }
 
 #[tokio::main]
