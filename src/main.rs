@@ -43,7 +43,7 @@ struct UriEntry {
     response_success: Option<bool>,
     is_fetching: bool,
     resp_headers: Option<HeaderMap>,
-    fetch_complete_time: Option<Instant>,
+    last_upstream_req_time: Instant,
     last_req_time: Instant,
     request_params: RequestParams,
     clear_timer_creation_time: Option<Instant>,
@@ -115,7 +115,7 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
                 is_fetching: true,
                 response_success: None,
                 resp_headers: None,
-                fetch_complete_time: None,
+                last_upstream_req_time: Instant::now(),
                 last_req_time: Instant::now(),
                 request_params: (*req_params).clone(),
                 clear_timer_creation_time: None,
@@ -139,7 +139,7 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
                 is_fetching: true,
                 response_success: None,
                 resp_headers: current_item.resp_headers.clone(),
-                fetch_complete_time: None,
+                last_upstream_req_time: Instant::now(),
                 last_req_time: current_item.last_req_time,
                 request_params: current_item.request_params.clone(),
                 clear_timer_creation_time: None,
@@ -192,7 +192,7 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
                 response_success: Some(true),
                 is_fetching: false,
                 resp_headers: update_cache_entry.resp_headers.clone(),
-                fetch_complete_time: Some(Instant::now()),
+                last_upstream_req_time: current_item.last_upstream_req_time,
                 last_req_time: current_item.last_req_time,
                 request_params: current_item.request_params.clone(),
                 clear_timer_creation_time: None,
@@ -210,7 +210,7 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
                 response_success: Some(false),
                 is_fetching: false,
                 resp_headers: None,
-                fetch_complete_time: Some(Instant::now()),
+                last_upstream_req_time: current_item.last_upstream_req_time,
                 last_req_time: current_item.last_req_time,
                 request_params: current_item.request_params.clone(),
                 clear_timer_creation_time: None,
@@ -329,9 +329,12 @@ async fn incr_count() -> u32 {
 async fn is_fetching_uri(uri: &String) -> bool {
     let app_state = &APP_STATE.uri_cache.read().await;
     let cache_item = app_state.get(uri);
+    let env = ENV.read().await;
+    let timeout = env.get("REQ_TIMEOUT").unwrap().parse::<u64>().unwrap();
 
     match cache_item {
-        Some(item) => item.is_fetching,
+        Some(item) => item.is_fetching &&
+            item.last_upstream_req_time.elapsed() < Duration::from_secs(timeout),
         None => false,
     }
 }
