@@ -25,7 +25,8 @@ This also features a Docker setup with nginx in front, which allows further conf
 #### On-demand cache refreshing/clearing from the upstream service:
 
 ```
-1. reverse-proxy-rust (port 8000) <- upstream service (request from upstream service to initial refresh or clearing)
+1. reverse-proxy-rust (port 8000) <- upstream service (request from upstream service to
+                                                       trigger initial refresh or clearing)
 2. reverse-proxy-rust -> upstream service (request from reverse-proxy to upstream service
                                            for latest data, triggered by step 1 above)
 ``` 
