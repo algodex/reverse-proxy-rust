@@ -197,6 +197,7 @@ async fn update_cache(msg: &UriCacheUpdateMessage) -> bool {
                     <= Duration::from_secs(cache_refresh_window)
                 && !timer_mismatch_detected
             {
+                // We are still in the refresh window, so refresh the cache
                 let request_params = cache_item.unwrap().request_params.clone();
                 let uri = uri.clone();
                 task::spawn(async move {
@@ -211,6 +212,8 @@ async fn update_cache(msg: &UriCacheUpdateMessage) -> bool {
             } else if !timer_mismatch_detected {
                 debug_println!("Deleting Cache (actually): {uri}");
                 uri_cache.remove(uri);
+            } else {
+                debug_println!("Timer mismatch! {uri}");
             }
         }
         FinishFetchingWithSuccess(uri, update_cache_entry) => {
