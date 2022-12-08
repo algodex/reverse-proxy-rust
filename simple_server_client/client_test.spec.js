@@ -55,5 +55,9 @@ const runTestParallel1 = async () => {
   }
 };
 
-runTest();
-runTestParallel1();
+const runTests = async () => {
+  await runTest();
+  await runTestParallel1();
+};
+
+runTests();
