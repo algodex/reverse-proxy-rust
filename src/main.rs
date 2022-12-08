@@ -103,13 +103,25 @@ lazy_static! {
 }
 
 #[async_recursion]
-async fn update_cache(msg: &UriCacheUpdateMessage) {
+async fn update_cache(msg: &UriCacheUpdateMessage) -> bool {
     // debug_dbg!(msg);
     let mut uri_cache = APP_STATE.uri_cache.write().await;
 
     match msg {
         StartFetchingFromClient(uri, req_params) => {
             debug_println!("StartFetchingFromClient: {uri}");
+            let current_item = uri_cache.get(uri);
+            if current_item.is_some() && current_item.unwrap().is_fetching {
+                debug_println!("Already an entry that is fetching. Checking timeout");
+                let env = ENV.read().await;
+                let timeout = env.get("REQ_TIMEOUT").unwrap().parse::<u64>().unwrap();
+                if current_item.unwrap().last_upstream_req_time.elapsed() < Duration::from_secs(timeout) {
+                    debug_println!("Timeout is only {}", current_item.unwrap().last_upstream_req_time.elapsed().as_secs());
+                    return false;
+                }
+                debug_println!("Going to refetch!");
+            }
+
             let entry = UriEntry {
                 response_body: None,
                 is_fetching: true,
@@ -130,9 +142,19 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
         }
         StartFetchingFromRefresh(uri) => {
             debug_println!("StartFetchingFromRefresh: {uri}");
-            let current_item = uri_cache.get(uri).expect(
-                "Expected a cached item, but did not find one. Accidentally deleted? {uri}",
-            );
+            let current_item = uri_cache.get(uri);
+            if current_item.is_none() {
+                return false;
+            }
+            let current_item = current_item.unwrap();
+
+            if (current_item.is_fetching) {
+                let env = ENV.read().await;
+                let timeout = env.get("REQ_TIMEOUT").unwrap().parse::<u64>().unwrap();
+                if current_item.last_upstream_req_time.elapsed() < Duration::from_secs(timeout) {
+                    return false;
+                }
+            }
 
             let entry = UriEntry {
                 response_body: current_item.response_body.clone(),
@@ -174,7 +196,11 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
                 task::spawn(async move {
                     let req_count = incr_count().await;
                     debug_println!("Refreshing Cache: {uri}");
-                    background_refresh_cache(request_params.clone(), req_count, true).await;
+                    let not_fetching = update_cache(&StartFetchingFromRefresh(uri.clone())).await;
+
+                    if not_fetching {
+                        background_refresh_cache(request_params.clone(), req_count).await;
+                    }
                 });
             } else if !timer_mismatch_detected {
                 debug_println!("Deleting Cache (actually): {uri}");
@@ -225,6 +251,8 @@ async fn update_cache(msg: &UriCacheUpdateMessage) {
             }
         }
     }
+
+    true
 }
 
 // fn debug_request(req: Request<Body>) -> Result<Response<Body>, Infallible> {
@@ -326,17 +354,11 @@ async fn incr_count() -> u32 {
     *w
 }
 
-async fn is_fetching_uri(uri: &String) -> bool {
-    let app_state = &APP_STATE.uri_cache.read().await;
-    let cache_item = app_state.get(uri);
-    let env = ENV.read().await;
-    let timeout = env.get("REQ_TIMEOUT").unwrap().parse::<u64>().unwrap();
+async fn check_or_start_fetching_uri(uri: &String,
+        c_req_params: RequestParams) -> bool {
 
-    match cache_item {
-        Some(item) => item.is_fetching &&
-            item.last_upstream_req_time.elapsed() < Duration::from_secs(timeout),
-        None => false,
-    }
+    // Returns true if not fetching
+    update_cache(&StartFetchingFromClient(uri.clone(), c_req_params)).await
 }
 
 pub async fn read_json_body(req: &mut Request<Body>) -> String {
@@ -395,9 +417,7 @@ async fn clear_cache(req: Request<Body>) -> Result<hyper::Response<Body>, Infall
 async fn background_refresh_cache(
     request_params: RequestParams,
     count: u32,
-    from_refresh: bool,
 ) -> Result<hyper::Response<Body>, Infallible> {
-    let c_req_params = request_params.clone();
     let RequestParams {
         uri,
         query_str,
@@ -406,12 +426,6 @@ async fn background_refresh_cache(
         body,
         request_etag,
     } = request_params;
-
-    if from_refresh {
-        update_cache(&StartFetchingFromRefresh(uri.clone())).await;
-    } else {
-        update_cache(&StartFetchingFromClient(uri.clone(), c_req_params)).await;
-    }
 
     let uri_path = uri.clone(); //fixme - clean this up? not necessary
 
@@ -550,7 +564,10 @@ async fn handle(
     }
 
     debug_println!("{count}: no cache found... {uri_path}");
-    let is_fetching = is_fetching_uri(uri_path).await;
+    let req_params = RequestParams { uri: uri_path.clone(), query_str, header_map,
+            method, body, request_etag: request_etag.clone() };
+
+    let is_fetching = !check_or_start_fetching_uri(uri_path, req_params.clone()).await;
 
     if is_fetching {
         debug_println!("{count}: other task is fetching. waiting for response in polling loop");
@@ -573,9 +590,8 @@ async fn handle(
     // Not currently in cache, so try to fetch and refresh cache
 
     return background_refresh_cache(
-        RequestParams { uri: uri_path.clone(), query_str, header_map, method, body, request_etag },
+        req_params,
         count,
-        false,
     )
     .await;
 }
