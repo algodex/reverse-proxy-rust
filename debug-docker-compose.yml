@@ -17,5 +17,5 @@ services:
       dockerfile: Dockerfile.debug
     ports:
       - "8000:8000"
-    entrypoint: "./target/debug/reverse_proxy_test"
+    entrypoint: "./target/debug/reverse_proxy"
     # command: 

@@ -1,5 +1,5 @@
 [package]
-name = "reverse_proxy_test"
+name = "reverse_proxy"
 version = "0.1.0"
 edition = "2021"
 

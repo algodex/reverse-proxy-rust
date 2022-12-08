@@ -15,5 +15,5 @@ services:
     build: .
     ports:
       - "8000:8000"
-    entrypoint: "./target/release/reverse_proxy_test"
+    entrypoint: "./target/release/reverse_proxy"
     # command: 
