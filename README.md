@@ -24,7 +24,9 @@ This also features a Docker setup with nginx in front, which allows further conf
 
 #### On-demand cache refreshing/clearing from the upstream service:
 
-```reverse-proxy-rust <- upstream service``` 
+```reverse-proxy-rust (port 8000) <- upstream service``` 
+
+Note: `CLEAR_CACHE_KEY` and `CLEAR_CACHE` must be set in the request headers. Although it is called "clear cache", it actually means refresh or clear cache, depending on when the last client request was and the DEFAULT_REFRESH_WINDOW_SECS setting. 
 
 ## Requirements
 
