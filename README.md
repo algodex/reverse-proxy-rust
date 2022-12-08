@@ -14,15 +14,15 @@ This also features a Docker setup with nginx in front, which allows further conf
 
 ## Basic Architecture
 
-Cache miss):
+#### Cache miss
 
 ```client -> nginx (port 8080) -> reverse-proxy-rust (port 8000) -> upstream service```
 
-Cache hit:
+#### Cache hit
 
 ```client -> nginx (port 8080) -> reverse-proxy-rust (port 8000)```
 
-On-demand cache refreshing/clearing from the upstream service:
+#### On-demand cache refreshing/clearing from the upstream service:
 
 ```reverse-proxy-rust <- upstream service``` 
 
